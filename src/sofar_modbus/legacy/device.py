@@ -1,0 +1,139 @@
+"""The top-level object for an older-generation Sofar inverter."""
+
+from __future__ import annotations
+
+import re
+from typing import TYPE_CHECKING
+
+from modbus_connection.decode import decode_string
+from modbus_connection.model import ComponentGroup
+
+from ..model import SofarLegacyComponent
+from ..variants import EPS, HYBRID, PV, X1, X3, InverterType, matches
+from .identity import LegacyIdentity
+from .pv import HybridPvString1, HybridPvString2, PvCommon, SinglePhasePv, ThreePhasePv
+from .storage import AcBatterySettings, Storage, StorageEps, StorageThreePhase
+
+if TYPE_CHECKING:
+    from modbus_connection import ModbusUnit
+
+SERIAL_REGISTER = 0x2002  # input register space
+SERIAL_WORDS = 6
+
+# Serial-number prefix -> inverter bitmask, from the plugin's
+# async_determineInverterType. This generation reports no model name.
+_SERIAL_PREFIXES: tuple[tuple[str, InverterType], ...] = (
+    ("SE1E", HYBRID | X1),
+    ("SM1E", HYBRID | X1),
+    ("ZE1E", HYBRID | X1),
+    ("ZM1E", HYBRID | X1),
+    ("SA1", PV | X1),
+    ("SA3", PV | X1),
+    ("SB1", PV | X1),
+    ("ZA3", PV | X1),
+    ("SC1", PV | X3),
+    ("SD1", PV | X3),
+    ("SF4", PV | X3),
+    ("SH1", PV | X3),
+    ("SJ2", PV | X3),
+    ("SL1", PV | X3),
+    ("SM1", PV),
+)
+
+
+def identify(serial: str) -> InverterType:
+    """The inverter type a serial number implies, or ``InverterType(0)``."""
+    for prefix, invertertype in _SERIAL_PREFIXES:
+        if serial.startswith(prefix):
+            return invertertype
+    return InverterType(0)
+
+
+class SofarLegacyInverter:
+    """An older Sofar inverter reached through a ``ModbusUnit``.
+
+    Same shape as :class:`sofar_modbus.SofarInverter`, over the older register
+    map: the 0x0000 block for PV-only inverters and the 0x0200 block for storage
+    ones. This generation is read-only — the plugin declares no writable
+    register for it, so neither does this library.
+
+    ASCII framing over TCP is not supported. Build the unit from an RTU or
+    RTU-over-TCP connection.
+    """
+
+    def __init__(
+        self,
+        unit: ModbusUnit,
+        *,
+        inverter_type: InverterType | None = None,
+        read_eps: bool = False,
+    ) -> None:
+        self._unit = unit
+        self._options = EPS if read_eps else InverterType(0)
+        self.inverter_type: InverterType | None = None
+        self.serial_number: str | None = None
+        if inverter_type is not None:
+            self.inverter_type = inverter_type | self._options
+
+        self.identity = LegacyIdentity(unit)
+        self.pv_common = PvCommon(unit)
+        self.pv_single_phase = SinglePhasePv(unit)
+        self.pv_three_phase = ThreePhasePv(unit)
+        self.storage = Storage(unit)
+        self.storage_three_phase = StorageThreePhase(unit)
+        self.storage_eps = StorageEps(unit)
+        self.hybrid_pv_1 = HybridPvString1(unit)
+        self.hybrid_pv_2 = HybridPvString2(unit)
+        self.battery_settings = AcBatterySettings(unit)
+
+        self._group: ComponentGroup | None = None
+
+    @property
+    def components(self) -> tuple[SofarLegacyComponent, ...]:
+        """Every sub-system this generation knows, polled or not."""
+        return (
+            self.identity,
+            self.pv_common,
+            self.pv_single_phase,
+            self.pv_three_phase,
+            self.storage,
+            self.storage_three_phase,
+            self.storage_eps,
+            self.hybrid_pv_1,
+            self.hybrid_pv_2,
+            self.battery_settings,
+        )
+
+    @property
+    def polled_components(self) -> tuple[SofarLegacyComponent, ...]:
+        """The sub-systems this inverter serves, which a poll refreshes."""
+        if self.inverter_type is None:
+            return ()
+        return tuple(
+            component
+            for component in self.components
+            if matches(self.inverter_type, component.applies_to)
+        )
+
+    @property
+    def pv_power_total(self) -> float | None:
+        """Total PV power of a hybrid inverter, summed over its two strings."""
+        powers = [self.hybrid_pv_1.pv_power_1, self.hybrid_pv_2.pv_power_2]
+        present = [p for p in powers if p is not None]
+        return sum(present) if present else None
+
+    async def async_setup(self) -> None:
+        """Read the serial number, settle the model, and pool what to poll."""
+        words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
+        # The plugin strips the punctuation these boards pad the field with.
+        self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
+        if self.inverter_type is None:
+            self.inverter_type = identify(self.serial_number) | self._options
+        self._group = ComponentGroup(self._unit, list(self.polled_components))
+
+    async def async_update(self) -> None:
+        """Refresh every sub-system this inverter serves, in one pooled read."""
+        if self._group is None:
+            await self.async_setup()
+        assert self._group is not None  # async_setup() always builds it
+        await self._group.async_update()
