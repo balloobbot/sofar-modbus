@@ -1,0 +1,112 @@
+"""The current-generation Sofar register map (upstream ``plugin_sofar.py``).
+
+Covers the HYD hybrid and KTL-X / KTLM PV inverters that speak the 0x0400
+(state), 0x0500 (off-grid), 0x0580 (PV), 0x0600 (battery), 0x0680 (energy),
+0x1000 (settings) and 0x9000 (BTS battery tower) blocks.
+"""
+
+from .battery import BatteryStrings1To2, BatteryStrings3To8, BatteryTotals
+from .battery_pack import BatteryPack
+from .device import SofarInverter, identify
+from .energy import BatteryEnergy, EnergyTotals
+from .enums import (
+    BatConfigCellType,
+    BatConfigProtocol,
+    ChargerUseMode,
+    EpsControlMode,
+    Fault1,
+    Fault2,
+    Fault3,
+    Fault4,
+    Fault5,
+    Fault6,
+    Fault7,
+    Fault8,
+    Fault9,
+    Fault10,
+    Fault11,
+    Fault12,
+    FeedinLimitationMode,
+    ParallelMasterslave,
+    PassiveModeTimeoutAction,
+    RemoteSwitchOnOff,
+    SyncRtcResult,
+    SystemState,
+)
+from .inverter import GridOutput, Identity, InverterState
+from .offgrid import OffGridSinglePhase, OffGridThreePhase, OffGridTotals
+from .pv import (
+    PvString3,
+    PvString4,
+    PvStrings1To2,
+    PvStrings5To6,
+    PvStrings7To8,
+    PvStrings9To10,
+)
+from .settings import (
+    BatteryActiveControl,
+    BatteryConfig,
+    BatteryConfigId,
+    ChargerMode,
+    EpsControl,
+    FeedInLimit,
+    ParallelControl,
+    PassiveMode,
+    RemoteControl,
+    RtcSyncResult,
+)
+
+__all__ = [
+    "BatConfigCellType",
+    "BatConfigProtocol",
+    "BatteryActiveControl",
+    "BatteryConfig",
+    "BatteryConfigId",
+    "BatteryEnergy",
+    "BatteryPack",
+    "BatteryStrings1To2",
+    "BatteryStrings3To8",
+    "BatteryTotals",
+    "ChargerMode",
+    "ChargerUseMode",
+    "EnergyTotals",
+    "EpsControl",
+    "EpsControlMode",
+    "Fault1",
+    "Fault2",
+    "Fault3",
+    "Fault4",
+    "Fault5",
+    "Fault6",
+    "Fault7",
+    "Fault8",
+    "Fault9",
+    "Fault10",
+    "Fault11",
+    "Fault12",
+    "FeedInLimit",
+    "FeedinLimitationMode",
+    "GridOutput",
+    "Identity",
+    "InverterState",
+    "OffGridSinglePhase",
+    "OffGridThreePhase",
+    "OffGridTotals",
+    "ParallelControl",
+    "ParallelMasterslave",
+    "PassiveMode",
+    "PassiveModeTimeoutAction",
+    "PvString3",
+    "PvString4",
+    "PvStrings1To2",
+    "PvStrings5To6",
+    "PvStrings7To8",
+    "PvStrings9To10",
+    "RemoteControl",
+    "RemoteSwitchOnOff",
+    "RtcSyncResult",
+    "SofarInverter",
+    "SyncRtcResult",
+    "SystemState",
+    "identify",
+]
