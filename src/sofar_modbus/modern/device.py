@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from modbus_connection import ModbusConnectionError, ModbusError
 from modbus_connection.decode import decode_string
-from modbus_connection.model import ComponentGroup
 
-from ..model import SofarComponent
+from ..model import SofarComponent, UpdateReport
 from ..variants import (
     BAT_BTS,
     EPS,
@@ -172,7 +172,7 @@ class SofarInverter:
         # Read one pack at a time through async_read_pack(), never with the poll.
         self.battery_pack = BatteryPack(unit)
 
-        self._group: ComponentGroup | None = None
+        self._ready = False
 
     @property
     def components(self) -> tuple[SofarComponent, ...]:
@@ -231,7 +231,7 @@ class SofarInverter:
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
 
     async def async_setup(self) -> None:
-        """Read the serial number, settle the model, and pool what to poll.
+        """Read the serial number and settle the model.
 
         Run by the first :meth:`async_update` if the caller does not run it
         itself. A failure leaves the device unset up, so the next update retries.
@@ -244,14 +244,33 @@ class SofarInverter:
             self.model = model
         elif model is not None:
             self.model = model
-        self._group = ComponentGroup(self._unit, list(self.polled_components))
+        self._ready = True
 
-    async def async_update(self) -> None:
-        """Refresh every sub-system this inverter serves, in one pooled read."""
-        if self._group is None:
+    async def async_update(self) -> UpdateReport:
+        """Refresh every sub-system this inverter serves, one at a time.
+
+        Components are read independently, the way the integration reads its
+        blocks: a sub-system whose read fails keeps its previous values while
+        the rest still refresh. Listeners fire only after every component has
+        been tried, and only on the ones that refreshed. A failure of the link
+        itself raises ``ModbusConnectionError`` instead of reporting.
+        """
+        if not self._ready:
             await self.async_setup()
-        assert self._group is not None  # async_setup() always builds it
-        await self._group.async_update()
+        updated: list[SofarComponent] = []
+        failed: list[tuple[SofarComponent, ModbusError]] = []
+        for component in self.polled_components:
+            try:
+                await component.async_update(notify=False)
+            except ModbusConnectionError:
+                raise
+            except ModbusError as err:
+                failed.append((component, err))
+            else:
+                updated.append(component)
+        for component in updated:
+            component.notify()
+        return UpdateReport(tuple(updated), tuple(failed))
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.

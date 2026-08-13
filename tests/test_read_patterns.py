@@ -187,6 +187,9 @@ async def test_legacy_storage_reads_one_block_plus_the_pv_strings(
     assert blocks == [
         ("input", 0x2002, 6),  # serial number
         ("holding", 0x0200, 70),  # the whole storage block
+        # EPS re-reads the two registers storage's bridge already covered:
+        # each component is its own failure domain since the per-component poll.
+        ("holding", 0x0216, 2),
         ("holding", 0x0250, 3),
         ("holding", 0x0253, 3),
     ]
@@ -202,7 +205,14 @@ async def test_legacy_three_phase_pv_reads_only_the_0x0000_block(
     blocks = [
         (b.register_type, b.address, b.count) for b in mock_modbus_unit.read_events
     ]
-    assert blocks == [("input", 0x2002, 6), ("holding", 0x0000, 33)]
+    # PvCommon and ThreePhasePv poll apart; PvCommon's temperatures (0x1B/0x1C)
+    # are re-read inside ThreePhasePv's span, where upstream aliases them.
+    assert blocks == [
+        ("input", 0x2002, 6),
+        ("holding", 0x0000, 8),
+        ("holding", 0x001B, 2),
+        ("holding", 0x0008, 25),
+    ]
 
 
 async def test_legacy_poll_reads_every_field_of_every_polled_component(

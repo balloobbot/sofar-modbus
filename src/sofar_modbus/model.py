@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from modbus_connection import ModbusError
 from modbus_connection.model import Component
 
 from .variants import InverterType
@@ -29,3 +32,21 @@ class SofarLegacyComponent(SofarComponentBase):
     """A sub-system of the older register map."""
 
     max_span = 100  # the plugin's block_size for this generation
+
+
+@dataclass(frozen=True)
+class UpdateReport:
+    """What one poll refreshed.
+
+    A failed component kept its previous values and did not notify; the error
+    that failed it rides along. A dead link is never in here — the update
+    raises ``ModbusConnectionError`` instead of reporting partial silence.
+    """
+
+    updated: tuple[SofarComponentBase, ...]
+    failed: tuple[tuple[SofarComponentBase, ModbusError], ...]
+
+    @property
+    def complete(self) -> bool:
+        """Whether every polled component refreshed."""
+        return not self.failed

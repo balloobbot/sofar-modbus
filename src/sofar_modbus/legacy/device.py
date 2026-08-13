@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from modbus_connection import ModbusConnectionError, ModbusError
 from modbus_connection.decode import decode_string
-from modbus_connection.model import ComponentGroup
 
-from ..model import SofarLegacyComponent
+from ..model import SofarLegacyComponent, UpdateReport
 from ..variants import EPS, HYBRID, PV, X1, X3, InverterType, matches
 from .identity import LegacyIdentity
 from .pv import HybridPvString1, HybridPvString2, PvCommon, SinglePhasePv, ThreePhasePv
@@ -86,7 +86,7 @@ class SofarLegacyInverter:
         self.hybrid_pv_2 = HybridPvString2(unit)
         self.battery_settings = AcBatterySettings(unit)
 
-        self._group: ComponentGroup | None = None
+        self._ready = False
 
     @property
     def components(self) -> tuple[SofarLegacyComponent, ...]:
@@ -123,17 +123,35 @@ class SofarLegacyInverter:
         return sum(present) if present else None
 
     async def async_setup(self) -> None:
-        """Read the serial number, settle the model, and pool what to poll."""
+        """Read the serial number and settle the model."""
         words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
         # The plugin strips the punctuation these boards pad the field with.
         self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
-        self._group = ComponentGroup(self._unit, list(self.polled_components))
+        self._ready = True
 
-    async def async_update(self) -> None:
-        """Refresh every sub-system this inverter serves, in one pooled read."""
-        if self._group is None:
+    async def async_update(self) -> UpdateReport:
+        """Refresh every sub-system this inverter serves, one at a time.
+
+        Same contract as :meth:`sofar_modbus.SofarInverter.async_update`: a
+        failed component keeps its previous values and is reported, listeners
+        fire after the whole poll and only for refreshed components, and a
+        dead link raises ``ModbusConnectionError``.
+        """
+        if not self._ready:
             await self.async_setup()
-        assert self._group is not None  # async_setup() always builds it
-        await self._group.async_update()
+        updated: list[SofarLegacyComponent] = []
+        failed: list[tuple[SofarLegacyComponent, ModbusError]] = []
+        for component in self.polled_components:
+            try:
+                await component.async_update(notify=False)
+            except ModbusConnectionError:
+                raise
+            except ModbusError as err:
+                failed.append((component, err))
+            else:
+                updated.append(component)
+        for component in updated:
+            component.notify()
+        return UpdateReport(tuple(updated), tuple(failed))
