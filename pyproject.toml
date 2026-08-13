@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sofar-modbus"
-version = "0.1.0"
+version = "0.1.3"
 description = "Read Sofar Solar inverters (HYD, KTL-X and the older PV/storage range) over Modbus."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ classifiers = [
 dependencies = ["modbus-connection[tmodbus]>=4.6.1"]
 
 [project.urls]
-Homepage = "https://github.com/balloobbot/sofar-modbus"
+Homepage = "https://github.com/darkrain-nl/sofar-modbus"
 
 [dependency-groups]
 dev = [
