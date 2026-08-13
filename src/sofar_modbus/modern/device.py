@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from modbus_connection import ModbusConnectionError, ModbusError
 from modbus_connection.decode import decode_string
+from modbus_connection.model import ComponentGroup
 
 from ..model import SofarComponent, UpdateReport
 from ..variants import (
@@ -263,6 +264,24 @@ class SofarInverter:
             fresh: SofarComponent = getattr(self, name)
             fresh.notify()
         return UpdateReport(updated, failed)
+
+    async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
+        """Every register this inverter reads, undecoded — for diagnostics.
+
+        The serial number setup reads sits inside ``identity``, which is polled,
+        so the polled components already cover it. Left out are the blocks this
+        inverter does not serve, and ``battery_pack``: the tower answers for one
+        selected pack at a time, so a dump of that block would be whichever pack
+        happened to be selected, with nothing to say which. Read packs through
+        :meth:`async_read_pack`. The first call sets the inverter up.
+        """
+        if self._polled is None:
+            await self.async_setup()
+        assert self._polled is not None  # async_setup() builds it
+        components: list[SofarComponent] = [
+            getattr(self, name) for name in self._polled
+        ]
+        return await ComponentGroup(self._unit, components).async_read_raw()
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.

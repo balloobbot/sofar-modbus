@@ -103,6 +103,11 @@ if inverter.has_battery_tower:
     print(pack.pack_serial_number, pack.soc, pack.cell_1_voltage)
 ```
 
+For an issue report, `async_read_raw()` dumps every register the inverter reads
+undecoded, keyed by address space and address — every block a poll covers, for
+the sub-systems this model serves. The pack block is not in it: a dump of it
+would be whichever pack happened to be selected, with nothing to say which.
+
 ## ASCII over TCP is not supported
 
 Sofar inverters are reached over RTU or RTU-over-TCP. This library never accepts

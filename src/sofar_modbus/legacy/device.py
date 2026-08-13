@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from modbus_connection import ModbusConnectionError, ModbusError
 from modbus_connection.decode import decode_string
+from modbus_connection.model import ComponentGroup
 
 from ..model import SofarLegacyComponent, UpdateReport
 from ..variants import EPS, HYBRID, PV, X1, X3, InverterType, matches
@@ -150,3 +151,18 @@ class SofarLegacyInverter:
             fresh: SofarLegacyComponent = getattr(self, name)
             fresh.notify()
         return UpdateReport(updated, failed)
+
+    async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
+        """Every register this inverter reads, undecoded — for diagnostics.
+
+        The serial number setup reads is ``identity``'s only field and identity
+        is polled, so the polled components already cover it. Blocks this
+        inverter does not serve stay out. The first call sets the inverter up.
+        """
+        if self._polled is None:
+            await self.async_setup()
+        assert self._polled is not None  # async_setup() builds it
+        components: list[SofarLegacyComponent] = [
+            getattr(self, name) for name in self._polled
+        ]
+        return await ComponentGroup(self._unit, components).async_read_raw()

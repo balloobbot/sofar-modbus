@@ -229,3 +229,29 @@ async def test_legacy_poll_reads_every_field_of_every_polled_component(
             mock_modbus_unit.read_events, space
         )
         assert not missing, f"{name} missed {sorted(missing)}"
+
+
+async def test_raw_dump_covers_every_polled_component(hybrid: SofarInverter) -> None:
+    """Diagnostics dump the whole read map, the identity block included."""
+    report = await hybrid.async_update()
+
+    dumped = set((await hybrid.async_read_raw())["holding"])
+    assert 0x0445 in dumped  # the serial number setup reads
+    for name in report.updated:
+        missing = field_addresses(getattr(hybrid, name)) - dumped
+        assert not missing, f"{name} missed {sorted(missing)}"
+    # The tower serves one selected pack at a time; async_read_pack() reads it.
+    assert not dumped & field_addresses(hybrid.battery_pack)
+
+
+async def test_legacy_raw_dump_covers_every_polled_component(
+    legacy_hybrid: SofarLegacyInverter,
+) -> None:
+    report = await legacy_hybrid.async_update()
+
+    raw = await legacy_hybrid.async_read_raw()
+    assert 0x2002 in raw["input"]  # the serial number setup reads
+    for name in report.updated:
+        component = getattr(legacy_hybrid, name)
+        missing = field_addresses(component) - set(raw[component.register_space])
+        assert not missing, f"{name} missed {sorted(missing)}"
