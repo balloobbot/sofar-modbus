@@ -36,15 +36,15 @@ class SofarLegacyComponent(SofarComponentBase):
 
 @dataclass(frozen=True)
 class UpdateReport:
-    """What one poll refreshed.
+    """What one poll refreshed, by the device's component attribute names.
 
     A failed component kept its previous values and did not notify; the error
     that failed it rides along. A dead link is never in here — the update
     raises ``ModbusConnectionError`` instead of reporting partial silence.
     """
 
-    updated: tuple[SofarComponentBase, ...]
-    failed: tuple[tuple[SofarComponentBase, ModbusError], ...]
+    updated: set[str]
+    failed: dict[str, ModbusError]
 
     @property
     def complete(self) -> bool:

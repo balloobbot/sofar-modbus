@@ -32,9 +32,9 @@ async def test_a_failed_component_leaves_the_rest_fresh(
     report = await hybrid.async_update()
 
     assert not report.complete
-    assert [component for component, _ in report.failed] == [hybrid.grid]
-    assert isinstance(report.failed[0][1], ModbusTimeoutError)
-    assert hybrid.energy in report.updated
+    assert set(report.failed) == {"grid"}
+    assert isinstance(report.failed["grid"], ModbusTimeoutError)
+    assert "energy" in report.updated
     assert hybrid.grid.active_power_output_total == before
     assert hybrid.energy.solar_generation_today == 20.0
 
@@ -71,8 +71,8 @@ async def test_every_component_refreshes_on_a_healthy_device(
 ) -> None:
     report = await hybrid.async_update()
     assert report.complete
-    assert report.updated == hybrid.polled_components
-    assert report.failed == ()
+    assert report.updated == set(hybrid.polled_components)
+    assert report.failed == {}
 
 
 async def test_legacy_containment_matches_the_modern_contract(
@@ -84,7 +84,7 @@ async def test_legacy_containment_matches_the_modern_contract(
     mock_modbus_unit.fail_read(0x0250, ModbusTimeoutError("slow PV block"))
     report = await legacy_hybrid.async_update()
 
-    assert [component for component, _ in report.failed] == [legacy_hybrid.hybrid_pv_1]
+    assert set(report.failed) == {"hybrid_pv_1"}
     assert legacy_hybrid.storage.battery_capacity_charge == 80
     assert legacy_hybrid.hybrid_pv_1.pv_power_1 == 3000.0  # previous value kept
 

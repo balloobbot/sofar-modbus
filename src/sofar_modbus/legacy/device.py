@@ -89,31 +89,16 @@ class SofarLegacyInverter:
         self._ready = False
 
     @property
-    def components(self) -> tuple[SofarLegacyComponent, ...]:
-        """Every sub-system this generation knows, polled or not."""
-        return (
-            self.identity,
-            self.pv_common,
-            self.pv_single_phase,
-            self.pv_three_phase,
-            self.storage,
-            self.storage_three_phase,
-            self.storage_eps,
-            self.hybrid_pv_1,
-            self.hybrid_pv_2,
-            self.battery_settings,
-        )
-
-    @property
-    def polled_components(self) -> tuple[SofarLegacyComponent, ...]:
-        """The sub-systems this inverter serves, which a poll refreshes."""
+    def polled_components(self) -> dict[str, SofarLegacyComponent]:
+        """The sub-systems this inverter serves, keyed by attribute name."""
         if self.inverter_type is None:
-            return ()
-        return tuple(
-            component
-            for component in self.components
-            if matches(self.inverter_type, component.applies_to)
-        )
+            return {}
+        return {
+            name: component
+            for name, component in vars(self).items()
+            if isinstance(component, SofarLegacyComponent)
+            and matches(self.inverter_type, component.applies_to)
+        }
 
     @property
     def pv_power_total(self) -> float | None:
@@ -141,17 +126,17 @@ class SofarLegacyInverter:
         """
         if not self._ready:
             await self.async_setup()
-        updated: list[SofarLegacyComponent] = []
-        failed: list[tuple[SofarLegacyComponent, ModbusError]] = []
-        for component in self.polled_components:
+        updated: dict[str, SofarLegacyComponent] = {}
+        failed: dict[str, ModbusError] = {}
+        for name, component in self.polled_components.items():
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusError as err:
-                failed.append((component, err))
+                failed[name] = err
             else:
-                updated.append(component)
-        for component in updated:
+                updated[name] = component
+        for component in updated.values():
             component.notify()
-        return UpdateReport(tuple(updated), tuple(failed))
+        return UpdateReport(set(updated), failed)

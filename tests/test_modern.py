@@ -103,7 +103,7 @@ async def test_off_grid_is_read_only_when_eps_is_enabled(
     without_eps = SofarInverter(mock_modbus_unit)
     await without_eps.async_update()
     assert without_eps.offgrid.offgrid_frequency is None
-    assert without_eps.offgrid not in without_eps.polled_components
+    assert "offgrid" not in without_eps.polled_components
     assert not any(0x0504 <= b.address <= 0x0527 for b in mock_modbus_unit.read_events)
 
 
@@ -115,7 +115,7 @@ async def test_off_grid_three_phase(hybrid: SofarInverter) -> None:
     assert hybrid.offgrid_three_phase.offgrid_voltage_l2 == pytest.approx(228.8)
     # The single-phase layout overlaps the three-phase one at 0x050A; only the
     # component matching this inverter's phase count is polled.
-    assert hybrid.offgrid_single_phase not in hybrid.polled_components
+    assert "offgrid_single_phase" not in hybrid.polled_components
     assert hybrid.offgrid_single_phase.offgrid_voltage is None
 
 
@@ -127,7 +127,7 @@ async def test_pv_strings(hybrid: SofarInverter) -> None:
     assert hybrid.pv_1_2.pv_voltage_2 == pytest.approx(371.2)
     assert hybrid.pv_1_2.pv_power_total == pytest.approx(5.8)
     # A two-MPPT inverter never reads strings 3 and up.
-    assert hybrid.pv_3 not in hybrid.polled_components
+    assert "pv_3" not in hybrid.polled_components
     assert hybrid.pv_3.pv_voltage_3 is None
 
 
@@ -140,18 +140,12 @@ async def test_extra_mppt_strings_appear_on_a_ten_mppt_inverter(
     inverter = SofarInverter(mock_modbus_unit)
     await inverter.async_update()
     assert inverter.model == "100kW KTLX-G4"
-    for component in (
-        inverter.pv_3,
-        inverter.pv_4,
-        inverter.pv_5_6,
-        inverter.pv_7_8,
-        inverter.pv_9_10,
-    ):
-        assert component in inverter.polled_components
+    for name in ("pv_3", "pv_4", "pv_5_6", "pv_7_8", "pv_9_10"):
+        assert name in inverter.polled_components
     assert inverter.pv_9_10.pv_voltage_10 == pytest.approx(360.0)
     # PV-only: no battery, no hybrid-only settings.
-    assert inverter.battery_1_2 not in inverter.polled_components
-    assert inverter.charger not in inverter.polled_components
+    assert "battery_1_2" not in inverter.polled_components
+    assert "charger" not in inverter.polled_components
 
 
 async def test_battery_strings_and_totals(hybrid: SofarInverter) -> None:
@@ -319,5 +313,5 @@ async def test_the_battery_tower_is_never_part_of_a_poll(
 ) -> None:
     """Packs share one register block, so a poll cannot read them all."""
     await hybrid.async_update()
-    assert hybrid.battery_pack not in hybrid.polled_components
+    assert "battery_pack" not in hybrid.polled_components
     assert not any(b.address >= 0x9000 for b in mock_modbus_unit.read_events)

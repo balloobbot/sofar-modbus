@@ -54,7 +54,7 @@ async def test_a_poll_reads_every_field_of_every_polled_component(
 ) -> None:
     blocks = await poll(hybrid, mock_modbus_unit)
     read = covered(blocks)
-    for component in hybrid.polled_components:
+    for component in hybrid.polled_components.values():
         missing = field_addresses(component) - read
         assert not missing, f"{type(component).__name__} missed {sorted(missing)}"
 
@@ -71,7 +71,7 @@ async def test_a_poll_reads_nothing_no_component_asked_for(
     blocks = await poll(hybrid, mock_modbus_unit)
     spans = [
         (min(addresses), max(addresses))
-        for component in hybrid.polled_components
+        for component in hybrid.polled_components.values()
         if (addresses := field_addresses(component))
     ]
     for address in covered(blocks):
@@ -220,7 +220,7 @@ async def test_legacy_poll_reads_every_field_of_every_polled_component(
 ) -> None:
     mock_modbus_unit.holding.update(LEGACY_HOLDING)
     await legacy_hybrid.async_update()
-    for component in legacy_hybrid.polled_components:
+    for component in legacy_hybrid.polled_components.values():
         space = "input" if component.register_space == "input" else "holding"
         missing = field_addresses(component) - covered(
             mock_modbus_unit.read_events, space

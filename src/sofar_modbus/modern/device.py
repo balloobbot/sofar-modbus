@@ -175,55 +175,22 @@ class SofarInverter:
         self._ready = False
 
     @property
-    def components(self) -> tuple[SofarComponent, ...]:
-        """Every sub-system this generation knows, polled or not."""
-        return (
-            self.state,
-            self.identity,
-            self.grid,
-            self.offgrid,
-            self.offgrid_single_phase,
-            self.offgrid_three_phase,
-            self.pv_1_2,
-            self.pv_3,
-            self.pv_4,
-            self.pv_5_6,
-            self.pv_7_8,
-            self.pv_9_10,
-            self.battery_1_2,
-            self.battery_3_8,
-            self.battery_totals,
-            self.energy,
-            self.battery_energy,
-            self.rtc_sync,
-            self.feed_in,
-            self.eps,
-            self.battery_active_control,
-            self.parallel,
-            self.battery_config_id,
-            self.battery_config,
-            self.remote,
-            self.charger,
-            self.passive,
-            self.battery_pack,
-        )
-
-    @property
-    def polled_components(self) -> tuple[SofarComponent, ...]:
-        """The sub-systems this inverter serves, which a poll refreshes.
+    def polled_components(self) -> dict[str, SofarComponent]:
+        """The sub-systems this inverter serves, keyed by attribute name.
 
         The battery tower is left out: its packs share one register block and
         have to be selected one at a time, so it is read through
         :meth:`async_read_pack` instead.
         """
         if self.inverter_type is None:
-            return ()
-        return tuple(
-            component
-            for component in self.components
-            if component is not self.battery_pack
+            return {}
+        return {
+            name: component
+            for name, component in vars(self).items()
+            if isinstance(component, SofarComponent)
+            and component is not self.battery_pack
             and matches(self.inverter_type, component.applies_to)
-        )
+        }
 
     @property
     def has_battery_tower(self) -> bool:
@@ -257,20 +224,20 @@ class SofarInverter:
         """
         if not self._ready:
             await self.async_setup()
-        updated: list[SofarComponent] = []
-        failed: list[tuple[SofarComponent, ModbusError]] = []
-        for component in self.polled_components:
+        updated: dict[str, SofarComponent] = {}
+        failed: dict[str, ModbusError] = {}
+        for name, component in self.polled_components.items():
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusError as err:
-                failed.append((component, err))
+                failed[name] = err
             else:
-                updated.append(component)
-        for component in updated:
+                updated[name] = component
+        for component in updated.values():
             component.notify()
-        return UpdateReport(tuple(updated), tuple(failed))
+        return UpdateReport(set(updated), failed)
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.

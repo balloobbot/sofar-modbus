@@ -66,14 +66,14 @@ asyncio.run(main())
 A poll reads each sub-system independently, the way the integration reads its
 blocks: one slow or refused block does not take the rest of the poll with it.
 `async_update()` returns an `UpdateReport` — a failed component keeps its
-previous values, does not notify its listeners, and is listed with its error,
-while every other component refreshes and notifies once the whole poll is done.
-Only a dead link (`ModbusConnectionError`) raises:
+previous values, does not notify its listeners, and is listed by attribute
+name with its error, while every other component refreshes and notifies once
+the whole poll is done. Only a dead link (`ModbusConnectionError`) raises:
 
 ```python
 report = await inverter.async_update()
-for component, error in report.failed:
-    print(f"{type(component).__name__} kept its previous values: {error}")
+for name, error in report.failed.items():
+    print(f"{name} kept its previous values: {error}")
 ```
 
 Writing works the same way — a plain field write for the registers that take
