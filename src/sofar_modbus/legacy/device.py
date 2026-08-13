@@ -20,6 +20,20 @@ if TYPE_CHECKING:
 SERIAL_REGISTER = 0x2002  # input register space
 SERIAL_WORDS = 6
 
+# Every component attribute a poll may refresh, in read order.
+_POLLED = (
+    "identity",
+    "pv_common",
+    "pv_single_phase",
+    "pv_three_phase",
+    "storage",
+    "storage_three_phase",
+    "storage_eps",
+    "hybrid_pv_1",
+    "hybrid_pv_2",
+    "battery_settings",
+)
+
 # Serial-number prefix -> inverter bitmask, from the plugin's
 # async_determineInverterType. This generation reports no model name.
 _SERIAL_PREFIXES: tuple[tuple[str, InverterType], ...] = (
@@ -86,7 +100,7 @@ class SofarLegacyInverter:
         self.hybrid_pv_2 = HybridPvString2(unit)
         self.battery_settings = AcBatterySettings(unit)
 
-        self._ready = False
+        self._polled: list[str] | None = None
 
     @property
     def pv_power_total(self) -> float | None:
@@ -96,13 +110,18 @@ class SofarLegacyInverter:
         return sum(present) if present else None
 
     async def async_setup(self) -> None:
-        """Read the serial number and settle the model."""
+        """Read the serial number, settle the model, and pick what to poll."""
         words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
         # The plugin strips the punctuation these boards pad the field with.
         self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
-        self._ready = True
+        inverter_type = self.inverter_type
+        self._polled = [
+            name
+            for name in _POLLED
+            if matches(inverter_type, getattr(self, name).applies_to)
+        ]
 
     async def async_update(self) -> UpdateReport:
         """Refresh every sub-system this inverter serves, one at a time.
@@ -112,16 +131,13 @@ class SofarLegacyInverter:
         fire after the whole poll and only for refreshed components, and a
         dead link raises ``ModbusConnectionError``.
         """
-        if not self._ready:
+        if self._polled is None:
             await self.async_setup()
-        assert self.inverter_type is not None  # async_setup() settles it
-        updated: dict[str, SofarLegacyComponent] = {}
+        assert self._polled is not None  # async_setup() builds it
+        updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
-        for name, component in vars(self).items():
-            if not isinstance(component, SofarLegacyComponent) or not matches(
-                self.inverter_type, component.applies_to
-            ):
-                continue
+        for name in self._polled:
+            component: SofarLegacyComponent = getattr(self, name)
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
@@ -129,7 +145,8 @@ class SofarLegacyInverter:
             except ModbusError as err:
                 failed[name] = err
             else:
-                updated[name] = component
-        for component in updated.values():
-            component.notify()
-        return UpdateReport(set(updated), failed)
+                updated.add(name)
+        for name in updated:
+            fresh: SofarLegacyComponent = getattr(self, name)
+            fresh.notify()
+        return UpdateReport(updated, failed)

@@ -53,6 +53,38 @@ if TYPE_CHECKING:
 
 SERIAL_REGISTER = 0x0445
 SERIAL_WORDS = 7
+
+# Every component attribute a poll may refresh, in read order. battery_pack is
+# absent: its packs share one register block and are read via async_read_pack().
+_POLLED = (
+    "state",
+    "identity",
+    "grid",
+    "offgrid",
+    "offgrid_single_phase",
+    "offgrid_three_phase",
+    "pv_1_2",
+    "pv_3",
+    "pv_4",
+    "pv_5_6",
+    "pv_7_8",
+    "pv_9_10",
+    "battery_1_2",
+    "battery_3_8",
+    "battery_totals",
+    "energy",
+    "battery_energy",
+    "rtc_sync",
+    "feed_in",
+    "eps",
+    "battery_active_control",
+    "parallel",
+    "battery_config_id",
+    "battery_config",
+    "remote",
+    "charger",
+    "passive",
+)
 _SET_TIME_REGISTER = 0x1004
 _IV_CURVE_SCAN_REGISTER = 0x1027
 
@@ -172,7 +204,7 @@ class SofarInverter:
         # Read one pack at a time through async_read_pack(), never with the poll.
         self.battery_pack = BatteryPack(unit)
 
-        self._ready = False
+        self._polled: list[str] | None = None
 
     @property
     def has_battery_tower(self) -> bool:
@@ -180,7 +212,7 @@ class SofarInverter:
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
 
     async def async_setup(self) -> None:
-        """Read the serial number and settle the model.
+        """Read the serial number, settle the model, and pick what to poll.
 
         Run by the first :meth:`async_update` if the caller does not run it
         itself. A failure leaves the device unset up, so the next update retries.
@@ -193,7 +225,12 @@ class SofarInverter:
             self.model = model
         elif model is not None:
             self.model = model
-        self._ready = True
+        inverter_type = self.inverter_type
+        self._polled = [
+            name
+            for name in _POLLED
+            if matches(inverter_type, getattr(self, name).applies_to)
+        ]
 
     async def async_update(self) -> UpdateReport:
         """Refresh every sub-system this inverter serves, one at a time.
@@ -204,20 +241,13 @@ class SofarInverter:
         been tried, and only on the ones that refreshed. A failure of the link
         itself raises ``ModbusConnectionError`` instead of reporting.
         """
-        if not self._ready:
+        if self._polled is None:
             await self.async_setup()
-        assert self.inverter_type is not None  # async_setup() settles it
-        updated: dict[str, SofarComponent] = {}
+        assert self._polled is not None  # async_setup() builds it
+        updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
-        for name, component in vars(self).items():
-            if (
-                not isinstance(component, SofarComponent)
-                # The battery tower multiplexes its packs onto one block;
-                # async_read_pack() reads them one at a time instead.
-                or component is self.battery_pack
-                or not matches(self.inverter_type, component.applies_to)
-            ):
-                continue
+        for name in self._polled:
+            component: SofarComponent = getattr(self, name)
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
@@ -225,10 +255,11 @@ class SofarInverter:
             except ModbusError as err:
                 failed[name] = err
             else:
-                updated[name] = component
-        for component in updated.values():
-            component.notify()
-        return UpdateReport(set(updated), failed)
+                updated.add(name)
+        for name in updated:
+            fresh: SofarComponent = getattr(self, name)
+            fresh.notify()
+        return UpdateReport(updated, failed)
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.
