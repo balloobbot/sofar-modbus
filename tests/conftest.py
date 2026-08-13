@@ -112,6 +112,8 @@ MODERN_HOLDING: dict[int, int | list[int]] = {
     0x1048: 2560,  # charging voltage -> 256.0 V
     0x1051: 1,  # cell type -> Lithium iron phosphate
     0x1104: 1,  # remote switch -> On
+    0x1105: 1,  # power control -> Active_Power flag set
+    0x1106: 700,  # active power export limit -> 70.0 %
     0x1110: 1,  # charger mode -> Time of Use
     0x1184: 600,  # passive timeout -> 600 s
     0x1185: 1,  # passive timeout action -> Return to Previous Mode

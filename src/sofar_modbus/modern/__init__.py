@@ -29,6 +29,7 @@ from .enums import (
     FeedinLimitationMode,
     ParallelMasterslave,
     PassiveModeTimeoutAction,
+    PowerControlFlags,
     RemoteSwitchOnOff,
     SyncRtcResult,
     SystemState,
@@ -44,6 +45,7 @@ from .pv import (
     PvStrings9To10,
 )
 from .settings import (
+    ActivePowerControl,
     BatteryActiveControl,
     BatteryConfig,
     BatteryConfigId,
@@ -57,6 +59,7 @@ from .settings import (
 )
 
 __all__ = [
+    "ActivePowerControl",
     "BatConfigCellType",
     "BatConfigProtocol",
     "BatteryActiveControl",
@@ -96,6 +99,7 @@ __all__ = [
     "ParallelMasterslave",
     "PassiveMode",
     "PassiveModeTimeoutAction",
+    "PowerControlFlags",
     "PvString3",
     "PvString4",
     "PvStrings1To2",

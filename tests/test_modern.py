@@ -16,6 +16,7 @@ from sofar_modbus.modern import (
     FeedinLimitationMode,
     ParallelMasterslave,
     PassiveModeTimeoutAction,
+    PowerControlFlags,
     RemoteSwitchOnOff,
     SyncRtcResult,
     SystemState,
@@ -184,6 +185,8 @@ async def test_settings(hybrid: SofarInverter) -> None:
     assert hybrid.parallel.parallel_address == 3
     assert hybrid.battery_config.bat_config_charging_voltage == pytest.approx(256.0)
     assert hybrid.remote.remote_switch_on_off is RemoteSwitchOnOff.ON
+    assert hybrid.active_power_control.power_control is PowerControlFlags.ACTIVE_POWER
+    assert hybrid.active_power_control.active_power_export_limit == pytest.approx(70.0)
     assert hybrid.charger.charger_use_mode is ChargerUseMode.TIME_OF_USE
     assert hybrid.passive.passive_mode_timeout == 600
     assert (
@@ -236,6 +239,21 @@ async def test_feed_in_limit_writes_both_registers(
     assert [(e.address, e.values) for e in events] == [(0x1023, [0, 30])]
     with pytest.raises(ValueError, match="multiple of 100"):
         await hybrid.feed_in.async_write_limit(FeedinLimitationMode.DISABLED, 3050)
+
+
+async def test_active_power_limit_writes_both_registers(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    events: list[WriteEvent] = []
+    mock_modbus_unit.on_write(events.append)
+    await hybrid.active_power_control.async_write_active_power_limit(True, 30)
+    await hybrid.active_power_control.async_write_active_power_limit(False, 80)
+    assert [(e.address, e.values) for e in events] == [
+        (0x1105, [int(PowerControlFlags.ACTIVE_POWER), 300]),
+        (0x1105, [0, 800]),
+    ]
+    with pytest.raises(ValueError, match="outside 0-100"):
+        await hybrid.active_power_control.async_write_active_power_limit(True, 101)
 
 
 async def test_eps_control_writes_the_reserved_wait_time_as_zero(

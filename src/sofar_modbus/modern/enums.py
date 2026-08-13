@@ -322,3 +322,15 @@ class PassiveModeTimeoutAction(IntEnum):
 
     FORCE_STANDBY = 0
     RETURN_TO_PREVIOUS_MODE = 1
+
+
+class PowerControlFlags(IntFlag):
+    """Power_Control (register 1105) — which real-time control registers apply.
+
+    The device only acts on 1106-1109 while the matching bit here is set. Bits
+    1-4 (reactive power, power factor mode, SVG) are not modelled: nothing in
+    this library writes them yet.
+    """
+
+    ACTIVE_POWER = 1 << 0
+    """Apply Active_Power_Export_Limit (1106)."""

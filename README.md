@@ -87,7 +87,12 @@ await inverter.feed_in.async_write_limit(FeedinLimitationMode.DISABLED, 3000)
 await inverter.passive.async_write_power(
     grid_power=-2000, battery_min=0, battery_max=5000
 )
+await inverter.active_power_control.async_write_active_power_limit(True, 70)
 ```
+
+`active_power_control` is a live throttle on the inverter's own output — distinct
+from `feed_in`, which caps power exported to the grid. It applies to PV-only
+inverters as well as hybrids, and takes effect within seconds.
 
 A BTS battery tower multiplexes every pack onto one register block, so packs are
 read one at a time rather than polled:
