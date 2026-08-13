@@ -71,8 +71,9 @@ async def test_every_component_refreshes_on_a_healthy_device(
 ) -> None:
     report = await hybrid.async_update()
     assert report.complete
-    assert report.updated == set(hybrid.polled_components)
     assert report.failed == {}
+    assert {"state", "grid", "energy", "battery_totals"} <= report.updated
+    assert "battery_pack" not in report.updated
 
 
 async def test_legacy_containment_matches_the_modern_contract(

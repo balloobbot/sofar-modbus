@@ -76,8 +76,8 @@ async def test_hybrid_pv_strings(legacy_hybrid: SofarLegacyInverter) -> None:
 async def test_a_single_phase_storage_inverter_skips_the_s_and_t_phases(
     legacy_hybrid: SofarLegacyInverter,
 ) -> None:
-    await legacy_hybrid.async_update()
-    assert "storage_three_phase" not in legacy_hybrid.polled_components
+    report = await legacy_hybrid.async_update()
+    assert "storage_three_phase" not in report.updated
     assert legacy_hybrid.storage_three_phase.voltage_s is None
     assert legacy_hybrid.storage.voltage_r is not None
 
@@ -99,7 +99,7 @@ async def test_eps_registers_need_the_option(
 
 
 async def test_three_phase_pv(legacy_three_phase_pv: SofarLegacyInverter) -> None:
-    await legacy_three_phase_pv.async_update()
+    report = await legacy_three_phase_pv.async_update()
     assert legacy_three_phase_pv.inverter_type == PV | X3
     pv = legacy_three_phase_pv.pv_three_phase
     assert pv.pv_voltage_2 == pytest.approx(371.2)
@@ -110,7 +110,7 @@ async def test_three_phase_pv(legacy_three_phase_pv: SofarLegacyInverter) -> Non
     assert pv.bus_voltage == pytest.approx(650.1)
     assert pv.inverter_heatsink_temperature == 41
     # Storage registers belong to another inverter type.
-    assert "storage" not in legacy_three_phase_pv.polled_components
+    assert "storage" not in report.updated
 
 
 async def test_upstreams_shared_register_for_current_r_and_voltage_s(
@@ -139,8 +139,8 @@ async def test_the_pv_only_component_applies_to_both_phase_counts(
     three-phase temperatures at 0x001E/0x001F, and the two disagree. Both are
     kept, on their own components, rather than one silently winning.
     """
-    await legacy_three_phase_pv.async_update()
-    assert "pv_common" in legacy_three_phase_pv.polled_components
+    report = await legacy_three_phase_pv.async_update()
+    assert "pv_common" in report.updated
     assert legacy_three_phase_pv.pv_common.run_mode is PvRunMode.NORMAL_MODE
     assert (
         legacy_three_phase_pv.pv_common.declared_fields[

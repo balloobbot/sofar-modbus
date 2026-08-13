@@ -109,9 +109,9 @@ class SofarInverter:
 
     Which of the sub-systems below the device actually has depends on the model,
     which the first update reads off the serial number. Every component exists as
-    an attribute whatever the model; :attr:`polled_components` is the subset this
-    inverter serves, and it is the only part a poll reads. A component that is
-    not polled leaves all its fields at ``None``.
+    an attribute whatever the model; a poll reads only the subset this inverter
+    serves and reports it by attribute name. A component that is not polled
+    leaves all its fields at ``None``.
 
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
@@ -175,24 +175,6 @@ class SofarInverter:
         self._ready = False
 
     @property
-    def polled_components(self) -> dict[str, SofarComponent]:
-        """The sub-systems this inverter serves, keyed by attribute name.
-
-        The battery tower is left out: its packs share one register block and
-        have to be selected one at a time, so it is read through
-        :meth:`async_read_pack` instead.
-        """
-        if self.inverter_type is None:
-            return {}
-        return {
-            name: component
-            for name, component in vars(self).items()
-            if isinstance(component, SofarComponent)
-            and component is not self.battery_pack
-            and matches(self.inverter_type, component.applies_to)
-        }
-
-    @property
     def has_battery_tower(self) -> bool:
         """Whether this inverter reports a BTS battery tower."""
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
@@ -224,9 +206,18 @@ class SofarInverter:
         """
         if not self._ready:
             await self.async_setup()
+        assert self.inverter_type is not None  # async_setup() settles it
         updated: dict[str, SofarComponent] = {}
         failed: dict[str, ModbusError] = {}
-        for name, component in self.polled_components.items():
+        for name, component in vars(self).items():
+            if (
+                not isinstance(component, SofarComponent)
+                # The battery tower multiplexes its packs onto one block;
+                # async_read_pack() reads them one at a time instead.
+                or component is self.battery_pack
+                or not matches(self.inverter_type, component.applies_to)
+            ):
+                continue
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:

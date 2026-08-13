@@ -89,18 +89,6 @@ class SofarLegacyInverter:
         self._ready = False
 
     @property
-    def polled_components(self) -> dict[str, SofarLegacyComponent]:
-        """The sub-systems this inverter serves, keyed by attribute name."""
-        if self.inverter_type is None:
-            return {}
-        return {
-            name: component
-            for name, component in vars(self).items()
-            if isinstance(component, SofarLegacyComponent)
-            and matches(self.inverter_type, component.applies_to)
-        }
-
-    @property
     def pv_power_total(self) -> float | None:
         """Total PV power of a hybrid inverter, summed over its two strings."""
         powers = [self.hybrid_pv_1.pv_power_1, self.hybrid_pv_2.pv_power_2]
@@ -126,9 +114,14 @@ class SofarLegacyInverter:
         """
         if not self._ready:
             await self.async_setup()
+        assert self.inverter_type is not None  # async_setup() settles it
         updated: dict[str, SofarLegacyComponent] = {}
         failed: dict[str, ModbusError] = {}
-        for name, component in self.polled_components.items():
+        for name, component in vars(self).items():
+            if not isinstance(component, SofarLegacyComponent) or not matches(
+                self.inverter_type, component.applies_to
+            ):
+                continue
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:

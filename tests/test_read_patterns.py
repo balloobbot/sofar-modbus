@@ -54,9 +54,10 @@ async def test_a_poll_reads_every_field_of_every_polled_component(
 ) -> None:
     blocks = await poll(hybrid, mock_modbus_unit)
     read = covered(blocks)
-    for component in hybrid.polled_components.values():
-        missing = field_addresses(component) - read
-        assert not missing, f"{type(component).__name__} missed {sorted(missing)}"
+    report = await hybrid.async_update()
+    for name in report.updated:
+        missing = field_addresses(getattr(hybrid, name)) - read
+        assert not missing, f"{name} missed {sorted(missing)}"
 
 
 async def test_a_poll_reads_nothing_no_component_asked_for(
@@ -69,10 +70,11 @@ async def test_a_poll_reads_nothing_no_component_asked_for(
     a field or a hole inside one component's own span.
     """
     blocks = await poll(hybrid, mock_modbus_unit)
+    report = await hybrid.async_update()
     spans = [
         (min(addresses), max(addresses))
-        for component in hybrid.polled_components.values()
-        if (addresses := field_addresses(component))
+        for name in report.updated
+        if (addresses := field_addresses(getattr(hybrid, name)))
     ]
     for address in covered(blocks):
         assert any(low <= address <= high for low, high in spans), hex(address)
@@ -219,10 +221,11 @@ async def test_legacy_poll_reads_every_field_of_every_polled_component(
     legacy_hybrid: SofarLegacyInverter, mock_modbus_unit: MockModbusUnit
 ) -> None:
     mock_modbus_unit.holding.update(LEGACY_HOLDING)
-    await legacy_hybrid.async_update()
-    for component in legacy_hybrid.polled_components.values():
+    report = await legacy_hybrid.async_update()
+    for name in report.updated:
+        component = getattr(legacy_hybrid, name)
         space = "input" if component.register_space == "input" else "holding"
         missing = field_addresses(component) - covered(
             mock_modbus_unit.read_events, space
         )
-        assert not missing, f"{type(component).__name__} missed {sorted(missing)}"
+        assert not missing, f"{name} missed {sorted(missing)}"
