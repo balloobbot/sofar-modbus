@@ -36,6 +36,7 @@ from .pv import (
     PvStrings9To10,
 )
 from .settings import (
+    ActivePowerControl,
     BatteryActiveControl,
     BatteryConfig,
     BatteryConfigId,
@@ -82,6 +83,7 @@ _POLLED = (
     "battery_config_id",
     "battery_config",
     "remote",
+    "active_power_control",
     "charger",
     "passive",
 )
@@ -199,6 +201,7 @@ class SofarInverter:
         self.battery_config_id = BatteryConfigId(unit)
         self.battery_config = BatteryConfig(unit)
         self.remote = RemoteControl(unit)
+        self.active_power_control = ActivePowerControl(unit)
         self.charger = ChargerMode(unit)
         self.passive = PassiveMode(unit)
         # Read one pack at a time through async_read_pack(), never with the poll.

@@ -8,7 +8,7 @@ which the device requires and which the ``async_write_*`` methods below issue.
 from __future__ import annotations
 
 from modbus_connection.encode import encode_int
-from modbus_connection.model import boolean, enum, gauge, int32, integer
+from modbus_connection.model import boolean, enum, flags, gauge, int32, integer
 
 from ..model import SofarComponent
 from ..variants import EPS, HYBRID, PM, PV, X3
@@ -20,6 +20,7 @@ from .enums import (
     FeedinLimitationMode,
     ParallelMasterslave,
     PassiveModeTimeoutAction,
+    PowerControlFlags,
     RemoteSwitchOnOff,
     SyncRtcResult,
 )
@@ -60,6 +61,39 @@ class FeedInLimit(SofarComponent):
         if max_power % 100:
             raise ValueError(f"feed-in power {max_power} is not a multiple of 100 W")
         await self._unit.write_registers(0x1023, [int(mode), max_power // 100])
+
+
+class ActivePowerControl(SofarComponent):
+    """Real-time cap on the inverter's own output — register 1105/1106.
+
+    Distinct from ``FeedInLimit``: that caps power exported to the grid, this
+    caps generation directly, with no dependency on the inverter's own sense
+    of grid flow. The registers are volatile (no flash wear from writing them
+    often) and take effect within seconds.
+    """
+
+    applies_to = PV | HYBRID
+
+    power_control = flags(0x1105, PowerControlFlags, signed=False)
+    """Which of 1106-1109 the device is currently acting on."""
+    active_power_export_limit = gauge(0x1106, 0.1, signed=False, unit="%")
+    """Output ceiling, as a percentage of rated power."""
+
+    async def async_write_active_power_limit(
+        self, enabled: bool, limit_pct: float
+    ) -> None:
+        """Cap the inverter's own output at ``limit_pct`` % of rated power.
+
+        Registers 1105 and 1106 go out together, mirroring how the device
+        wants every other paired setting here: 1105 arms the limit, 1106 is
+        the percentage in 0.1% steps. Disabling clears the arm bit but leaves
+        the last-written percentage in place, matching the device's own
+        behaviour of ignoring 1106 while its bit in 1105 is unset.
+        """
+        if not 0 <= limit_pct <= 100:
+            raise ValueError(f"active power limit {limit_pct}% is outside 0-100")
+        control = PowerControlFlags.ACTIVE_POWER if enabled else PowerControlFlags(0)
+        await self._unit.write_registers(0x1105, [int(control), round(limit_pct * 10)])
 
 
 class EpsControl(SofarComponent):
