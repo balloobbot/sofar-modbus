@@ -35,6 +35,18 @@ _POLLED = (
     "battery_settings",
 )
 
+# Runs of registers several components tile, pooled into one read. Reading a
+# member apart costs a request and isolates nothing: ``storage`` spans
+# 0x0200-0x0245, which holds every S/T phase and EPS register, and
+# ``pv_three_phase`` spans 0x0008-0x0020, which holds ``pv_common``'s two
+# temperatures. ``pv_single_phase`` stops at 0x001A, short of them, so it is
+# a failure domain of its own and stays out. The pool takes its first member's
+# place in the poll list, so a poll still walks the map front to back.
+_POOLS: dict[str, tuple[str, ...]] = {
+    "storage_block": ("storage", "storage_three_phase", "storage_eps"),
+    "pv_block": ("pv_common", "pv_three_phase"),
+}
+
 # Serial-number prefix -> inverter bitmask, from the plugin's
 # async_determineInverterType. This generation reports no model name.
 _SERIAL_PREFIXES: tuple[tuple[str, InverterType], ...] = (
@@ -101,6 +113,10 @@ class SofarLegacyInverter:
         self.hybrid_pv_2 = HybridPvString2(unit)
         self.battery_settings = AcBatterySettings(unit)
 
+        # Built by setup from whichever members this inverter serves; see _POOLS.
+        self.storage_block: ComponentGroup | None = None
+        self.pv_block: ComponentGroup | None = None
+
         self._polled: list[str] | None = None
 
     @property
@@ -118,11 +134,33 @@ class SofarLegacyInverter:
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
         inverter_type = self.inverter_type
-        self._polled = [
+        served = [
             name
             for name in _POLLED
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
+        self._polled = self._pool(served)
+
+    def _pool(self, served: list[str]) -> list[str]:
+        """The poll list, with each served run of _POOLS replaced by its group."""
+        stands_for: dict[str, str] = {}
+        for pool, members in _POOLS.items():
+            present = [name for name in members if name in served]
+            if len(present) < 2:
+                continue  # nothing to pool; the lone member polls as itself
+            setattr(
+                self,
+                pool,
+                ComponentGroup(self._unit, [getattr(self, n) for n in present]),
+            )
+            stands_for |= dict.fromkeys(present, pool)
+
+        polled: list[str] = []
+        for name in served:
+            entry = stands_for.get(name, name)
+            if entry not in polled:
+                polled.append(entry)
+        return polled
 
     async def async_update(self) -> UpdateReport:
         """Refresh every sub-system this inverter serves, one at a time.
@@ -138,9 +176,9 @@ class SofarLegacyInverter:
         updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
         for name in self._polled:
-            component: SofarLegacyComponent = getattr(self, name)
+            target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
             try:
-                await component.async_update(notify=False)
+                await target.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusError as err:
@@ -148,7 +186,7 @@ class SofarLegacyInverter:
             else:
                 updated.add(name)
         for name in updated:
-            fresh: SofarLegacyComponent = getattr(self, name)
+            fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
             fresh.notify()
         return UpdateReport(updated, failed)
 
@@ -157,12 +195,15 @@ class SofarLegacyInverter:
 
         The serial number setup reads is ``identity``'s only field and identity
         is polled, so the polled components already cover it. Blocks this
-        inverter does not serve stay out. The first call sets the inverter up.
+        inverter does not serve stay out. Nothing notifies: a download is not a
+        poll. The first call sets the inverter up.
         """
         if self._polled is None:
             await self.async_setup()
         assert self._polled is not None  # async_setup() builds it
-        components: list[SofarLegacyComponent] = [
-            getattr(self, name) for name in self._polled
-        ]
-        return await ComponentGroup(self._unit, components).async_read_raw()
+        raw: dict[str, dict[int, int | bool]] = {}
+        for name in self._polled:
+            target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
+            for space, values in (await target.async_read_raw(notify=False)).items():
+                raw.setdefault(space, {}).update(values)
+        return raw

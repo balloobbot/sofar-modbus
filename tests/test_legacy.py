@@ -137,10 +137,11 @@ async def test_the_pv_only_component_applies_to_both_phase_counts(
 
     On a three-phase inverter that means 0x001B/0x001C are read *as well as* the
     three-phase temperatures at 0x001E/0x001F, and the two disagree. Both are
-    kept, on their own components, rather than one silently winning.
+    kept, on their own components, rather than one silently winning — the two
+    pool into one read, but each keeps its own field.
     """
     report = await legacy_three_phase_pv.async_update()
-    assert "pv_common" in report.updated
+    assert "pv_block" in report.updated
     assert legacy_three_phase_pv.pv_common.run_mode is PvRunMode.NORMAL_MODE
     assert (
         legacy_three_phase_pv.pv_common.declared_fields[

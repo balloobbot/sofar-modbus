@@ -65,6 +65,10 @@ asyncio.run(main())
 
 A poll reads each sub-system independently, the way the integration reads its
 blocks: one slow or refused block does not take the rest of the poll with it.
+The exception is a run of registers several sub-systems tile — the older
+generation's storage block and its three-phase PV block — where a read of one
+already spans the others, so they are pooled into that single request and
+reported under one name (`storage_block`, `pv_block`).
 `async_update()` returns an `UpdateReport` — a failed component keeps its
 previous values, does not notify its listeners, and is listed by attribute
 name with its error, while every other component refreshes and notifies once
@@ -105,8 +109,10 @@ if inverter.has_battery_tower:
 
 For an issue report, `async_read_raw()` dumps every register the inverter reads
 undecoded, keyed by address space and address — every block a poll covers, for
-the sub-systems this model serves. The pack block is not in it: a dump of it
-would be whichever pack happened to be selected, with nothing to say which.
+the sub-systems this model serves. It fires no update listeners — a download is
+not a poll, though the fields it reads do refresh. The pack block is not in it:
+a dump of it would be whichever pack happened to be selected, with nothing to
+say which.
 
 ## ASCII over TCP is not supported
 

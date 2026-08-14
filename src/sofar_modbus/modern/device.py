@@ -273,7 +273,8 @@ class SofarInverter:
         inverter does not serve, and ``battery_pack``: the tower answers for one
         selected pack at a time, so a dump of that block would be whichever pack
         happened to be selected, with nothing to say which. Read packs through
-        :meth:`async_read_pack`. The first call sets the inverter up.
+        :meth:`async_read_pack`. Nothing notifies: a download is not a poll.
+        The first call sets the inverter up.
         """
         if self._polled is None:
             await self.async_setup()
@@ -281,7 +282,7 @@ class SofarInverter:
         components: list[SofarComponent] = [
             getattr(self, name) for name in self._polled
         ]
-        return await ComponentGroup(self._unit, components).async_read_raw()
+        return await ComponentGroup(self._unit, components).async_read_raw(notify=False)
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.
