@@ -157,7 +157,8 @@ LEGACY_HOLDING: dict[int, int | list[int]] = {
     0x000C: 250,  # three-phase: PV power 1 -> 2.50
     0x000F: 480,  # three-phase: active power -> 4.80
     0x0012: 2301,  # voltage R -> 230.1 V
-    0x0014: 2299,  # voltage S -> 229.9 V (and current R, same register upstream)
+    0x0013: 1050,  # current R -> 10.50 A
+    0x0014: 2299,  # voltage S -> 229.9 V
     0x0018: [0, 5000],  # total production -> 5000 kWh
     0x001E: 41,  # heatsink temperature (three-phase)
     0x0020: 6501,  # bus voltage -> 650.1 V

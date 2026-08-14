@@ -252,8 +252,10 @@ async def test_raw_dump_covers_every_polled_component(hybrid: SofarInverter) -> 
     dumped = set((await hybrid.async_read_raw())["holding"])
     assert 0x0445 in dumped  # the serial number setup reads
     for name in report.updated:
-        missing = field_addresses(getattr(hybrid, name)) - dumped
+        component = getattr(hybrid, name)
+        missing = field_addresses(component) - dumped
         assert not missing, f"{name} missed {sorted(missing)}"
+        assert component._parent is None
     # The tower serves one selected pack at a time; async_read_pack() reads it.
     assert not dumped & field_addresses(hybrid.battery_pack)
 

@@ -106,6 +106,8 @@ async def test_three_phase_pv(legacy_three_phase_pv: SofarLegacyInverter) -> Non
     assert pv.pv_power_1 == pytest.approx(2.5)
     assert pv.activepower == pytest.approx(4.8)
     assert pv.voltage_r == pytest.approx(230.1)
+    assert pv.current_r == pytest.approx(10.5)
+    assert pv.voltage_s == pytest.approx(229.9)
     assert pv.total_production == 5000  # uint32
     assert pv.bus_voltage == pytest.approx(650.1)
     assert pv.inverter_heatsink_temperature == 41
@@ -113,20 +115,15 @@ async def test_three_phase_pv(legacy_three_phase_pv: SofarLegacyInverter) -> Non
     assert "storage" not in report.updated
 
 
-async def test_upstreams_shared_register_for_current_r_and_voltage_s(
+async def test_current_r_and_voltage_s_addresses(
     legacy_three_phase_pv: SofarLegacyInverter,
 ) -> None:
-    """Both three-phase entities read 0x0014 upstream; one of them is wrong.
-
-    Current R almost certainly belongs at 0x0013 — the phases are otherwise
-    (voltage, current) pairs — but the plugin declares 0x0014 for both, so the
-    two fields necessarily report the same register.
-    """
+    """Current R is at 0x0013 and Voltage S is at 0x0014."""
     await legacy_three_phase_pv.async_update()
     pv = legacy_three_phase_pv.pv_three_phase
-    assert pv.declared_fields["current_r"].address == 0x0014
+    assert pv.declared_fields["current_r"].address == 0x0013
     assert pv.declared_fields["voltage_s"].address == 0x0014
-    assert pv.current_r == pytest.approx(22.99)
+    assert pv.current_r == pytest.approx(10.5)
     assert pv.voltage_s == pytest.approx(229.9)
 
 
