@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from modbus_connection import (
+    IllegalDataAddressError,
     ModbusConnectionError,
     ModbusTimeoutError,
 )
@@ -97,3 +98,46 @@ async def test_a_failed_setup_still_raises(mock_modbus_unit: MockModbusUnit) -> 
     inverter = SofarInverter(mock_modbus_unit)
     with pytest.raises(ModbusTimeoutError):
         await inverter.async_update()
+
+
+async def test_a_timeout_with_nothing_answered_is_fatal(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """A silent inverter must cost one timeout, not one per component."""
+    await hybrid.async_update()
+
+    mock_modbus_unit.fail_read(0x0404, ModbusTimeoutError("inverter asleep"))
+    mock_modbus_unit.read_events.clear()
+    with pytest.raises(ModbusTimeoutError):
+        await hybrid.async_update()
+
+    # The first component is the probe: the poll gave up instead of walking on.
+    assert len(mock_modbus_unit.read_events) == 1
+
+
+async def test_a_refusal_on_the_first_component_is_still_contained(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """An exception response proves the inverter is there, so the poll goes on."""
+    await hybrid.async_update()
+
+    mock_modbus_unit.fail_read(0x0404, IllegalDataAddressError())
+    report = await hybrid.async_update()
+
+    assert set(report.failed) == {"state"}
+    assert "grid" in report.updated
+
+
+async def test_legacy_fatal_timeout_matches_the_modern_contract(
+    legacy_hybrid: SofarLegacyInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    await legacy_hybrid.async_update()
+
+    mock_modbus_unit.fail_read(
+        0x2002, ModbusTimeoutError("inverter asleep"), register_type="input"
+    )
+    mock_modbus_unit.read_events.clear()
+    with pytest.raises(ModbusTimeoutError):
+        await legacy_hybrid.async_update()
+
+    assert len(mock_modbus_unit.read_events) == 1

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from modbus_connection import ModbusConnectionError, ModbusError
+from modbus_connection import ModbusConnectionError, ModbusError, ModbusTimeoutError
 from modbus_connection.decode import decode_string
 
 from ..model import SofarComponent, UpdateReport
@@ -242,7 +242,9 @@ class SofarInverter:
         blocks: a sub-system whose read fails keeps its previous values while
         the rest still refresh. Listeners fire only after every component has
         been tried, and only on the ones that refreshed. A failure of the link
-        itself raises ``ModbusConnectionError`` instead of reporting.
+        itself raises ``ModbusConnectionError`` instead of reporting, and so
+        does a timeout before anything has answered: a silent inverter is not
+        walked component by component, paying a timeout for each.
         """
         if self._polled is None:
             await self.async_setup()
@@ -255,6 +257,10 @@ class SofarInverter:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
+            except ModbusTimeoutError as err:
+                if not updated and not failed:
+                    raise  # nothing answered at all: assume the rest time out too
+                failed[name] = err
             except ModbusError as err:
                 failed[name] = err
             else:
