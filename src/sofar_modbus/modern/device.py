@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from modbus_connection import ModbusConnectionError, ModbusError
 from modbus_connection.decode import decode_string
-from modbus_connection.model import ComponentGroup
 
 from ..model import SofarComponent, UpdateReport
 from ..variants import (
@@ -279,10 +278,12 @@ class SofarInverter:
         if self._polled is None:
             await self.async_setup()
         assert self._polled is not None  # async_setup() builds it
-        components: list[SofarComponent] = [
-            getattr(self, name) for name in self._polled
-        ]
-        return await ComponentGroup(self._unit, components).async_read_raw(notify=False)
+        raw: dict[str, dict[int, int | bool]] = {}
+        for name in self._polled:
+            component: SofarComponent = getattr(self, name)
+            for space, values in (await component.async_read_raw(notify=False)).items():
+                raw.setdefault(space, {}).update(values)
+        return raw
 
     async def async_read_pack(self, string_nr: int, pack_nr: int) -> BatteryPack:
         """Select a BTS pack and read it.
