@@ -54,7 +54,7 @@ class ThreePhasePv(SofarLegacyComponent):
     reactivepower = gauge(0x0010, 0.01, signed=True, unit="var")
     grid_frequency = gauge(0x0011, 0.01, signed=False, unit="Hz")
     voltage_r = gauge(0x0012, 0.1, signed=False, unit="V")
-    current_r = gauge(0x0014, 0.01, signed=False, unit="A")
+    current_r = gauge(0x0013, 0.01, signed=False, unit="A")
     voltage_s = gauge(0x0014, 0.1, signed=False, unit="V")
     current_s = gauge(0x0015, 0.01, signed=False, unit="A")
     voltage_t = gauge(0x0016, 0.1, signed=False, unit="V")
