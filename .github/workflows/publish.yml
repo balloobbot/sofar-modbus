@@ -16,15 +16,21 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
       - uses: astral-sh/setup-uv@v7
       - name: Set package version from release tag
-        run: sed -i "s/^version = \"0\\.0\\.0\"$/version = \"${RELEASE_TAG}\"/" pyproject.toml
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          sed -i "s/^version = \"0\\.0\\.0\"$/version = \"${VERSION}\"/" pyproject.toml
       - name: Verify the version was substituted
-        run: grep -qx "version = \"${RELEASE_TAG}\"" pyproject.toml
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          grep -qx "version = \"${VERSION}\"" pyproject.toml
       - run: uv build
       - uses: actions/upload-artifact@v7
         with:
