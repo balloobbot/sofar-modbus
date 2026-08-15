@@ -54,6 +54,14 @@ async def test_setup_reads_the_serial_and_settles_the_model(
     assert hybrid.has_battery_tower is True
 
 
+async def test_polled_components_mirrors_the_private_list(
+    hybrid: SofarInverter,
+) -> None:
+    assert hybrid.polled_components is None
+    await hybrid.async_update()
+    assert hybrid.polled_components == tuple(hybrid._polled)
+
+
 async def test_prime_sets_up_polling_like_async_setup_would(
     hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
 ) -> None:
