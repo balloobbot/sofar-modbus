@@ -59,6 +59,7 @@ async def test_polled_components_mirrors_the_private_list(
 ) -> None:
     assert hybrid.polled_components is None
     await hybrid.async_update()
+    assert hybrid._polled is not None
     assert hybrid.polled_components == tuple(hybrid._polled)
 
 
