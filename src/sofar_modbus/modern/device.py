@@ -214,6 +214,17 @@ class SofarInverter:
         """Whether this inverter reports a BTS battery tower."""
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
 
+    @property
+    def polled_components(self) -> tuple[str, ...] | None:
+        """Component names this inverter serves, in poll order.
+
+        None until `async_setup()` or `prime()` has run. Public mirror of the
+        private list they build, for callers (e.g. Home Assistant's
+        DataUpdateCoordinator) that need to split components into poll tiers
+        without reaching into `_polled` directly.
+        """
+        return tuple(self._polled) if self._polled is not None else None
+
     async def async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll.
 
