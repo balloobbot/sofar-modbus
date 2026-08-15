@@ -235,6 +235,29 @@ class SofarInverter:
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
 
+    def prime(self, serial_number: str, model: str | None) -> None:
+        """Set up polling from an already-known identity.
+
+        Skips the serial-number read `async_setup()` would otherwise need, for
+        callers that already know a device's identity from a previous probe
+        (e.g. a Home Assistant config entry's unique_id) and want to avoid
+        blocking on I/O to re-read it. `inverter_type` must already be set on
+        this instance -- pass it to the constructor. Mirrors `async_setup()`'s
+        post-read bookkeeping exactly.
+        """
+        if self.inverter_type is None:
+            raise ValueError(
+                "prime() requires inverter_type to already be set "
+                "(pass it to the constructor)"
+            )
+        self.serial_number = serial_number
+        self.model = model
+        self._polled = [
+            name
+            for name in _POLLED
+            if matches(self.inverter_type, getattr(self, name).applies_to)
+        ]
+
     async def async_update(self) -> UpdateReport:
         """Refresh every sub-system this inverter serves, one at a time.
 

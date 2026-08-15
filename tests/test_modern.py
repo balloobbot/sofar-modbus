@@ -54,6 +54,34 @@ async def test_setup_reads_the_serial_and_settles_the_model(
     assert hybrid.has_battery_tower is True
 
 
+async def test_prime_sets_up_polling_like_async_setup_would(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """A caller that already knows the identity can skip the I/O in async_setup()."""
+    await hybrid.async_update()  # the real thing prime() is meant to mirror
+
+    primed = SofarInverter(
+        mock_modbus_unit,
+        inverter_type=HYBRID | X3 | GEN | BAT_BTS,
+        read_eps=True,
+        read_pm=True,
+    )
+    primed.prime(HYBRID_SERIAL, "HYDxxKTL-3P")
+
+    assert primed.serial_number == HYBRID_SERIAL
+    assert primed.model == "HYDxxKTL-3P"
+    assert primed.inverter_type == hybrid.inverter_type
+    assert primed._polled == hybrid._polled
+
+
+def test_prime_requires_inverter_type_from_the_constructor(
+    mock_modbus_unit: MockModbusUnit,
+) -> None:
+    device = SofarInverter(mock_modbus_unit)
+    with pytest.raises(ValueError, match="prime\\(\\) requires inverter_type"):
+        device.prime(HYBRID_SERIAL, "HYDxxKTL-3P")
+
+
 async def test_state_and_faults(hybrid: SofarInverter) -> None:
     await hybrid.async_update()
     assert hybrid.state.system_state is SystemState.GRID_CONNECTED
