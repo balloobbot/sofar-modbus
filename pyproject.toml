@@ -52,7 +52,7 @@ convention = "pep257"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests"]
+files = ["src", "tests", "script"]
 strict = true
 
 [tool.ruff.lint.per-file-ignores]
