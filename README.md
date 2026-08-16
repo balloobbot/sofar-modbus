@@ -116,6 +116,22 @@ not a poll, though the fields it reads do refresh. The pack block is not in it:
 a dump of it would be whichever pack happened to be selected, with nothing to
 say which.
 
+## Checking a real inverter
+
+`script/query.py` reads one inverter once and prints every value it serves,
+which is the quickest way to see whether an inverter is reachable, addressed
+correctly, and detected as the model you expect:
+
+```bash
+uv run script/query.py 192.168.1.50 --unit 1 --framer rtu
+uv run script/query.py /dev/ttyUSB0 --transport serial --unit 1 --legacy
+```
+
+The two generations share serial prefixes, so the script does not guess which
+one it is talking to — pass `--legacy` for an older inverter. It prints the read
+count as well, so a poll's request budget is visible against real hardware
+rather than only in the tests.
+
 ## ASCII over TCP is not supported
 
 Sofar inverters are reached over RTU or RTU-over-TCP. This library never accepts
