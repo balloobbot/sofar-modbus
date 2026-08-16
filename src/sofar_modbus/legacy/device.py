@@ -21,9 +21,8 @@ if TYPE_CHECKING:
 SERIAL_REGISTER = 0x2002  # input register space
 SERIAL_WORDS = 6
 
-# Every component attribute a poll may refresh, in read order.
-_POLLED = (
-    "identity",
+# What the inverter measures, in read order.
+_READINGS = (
     "pv_common",
     "pv_single_phase",
     "pv_three_phase",
@@ -32,8 +31,13 @@ _POLLED = (
     "storage_eps",
     "hybrid_pv_1",
     "hybrid_pv_2",
-    "battery_settings",
 )
+
+# What the inverter has been configured to do, in read order. This generation
+# is read-only, so nothing here changes unless someone sets it on the inverter
+# itself. identity is in it because nothing in it is measured either — it is
+# the serial number, which never changes at all.
+_SETTINGS = ("identity", "battery_settings")
 
 # Runs of registers several components tile, pooled into one read. Reading a
 # member apart costs a request and isolates nothing: ``storage`` spans
@@ -84,6 +88,10 @@ class SofarLegacyInverter:
     ones. This generation is read-only — the plugin declares no writable
     register for it, so neither does this library.
 
+    Measurements and settings refresh separately, the same way and under the
+    same names as on the current generation: ``async_update_readings()``,
+    ``async_update_settings()`` and ``async_update()`` for both.
+
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
     """
@@ -117,7 +125,9 @@ class SofarLegacyInverter:
         self.storage_block: ComponentGroup | None = None
         self.pv_block: ComponentGroup | None = None
 
-        self._polled: list[str] | None = None
+        # The poll list of each update method; None until the inverter is set up.
+        self._readings: list[str] | None = None
+        self._settings: list[str] | None = None
 
     @property
     def pv_power_total(self) -> float | None:
@@ -133,13 +143,19 @@ class SofarLegacyInverter:
         self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
+        # Only readings tile each other, so only they are pooled.
+        self._readings = self._pool(self._served(_READINGS))
+        self._settings = self._served(_SETTINGS)
+
+    def _served(self, names: tuple[str, ...]) -> list[str]:
+        """Those of ``names`` this inverter's model actually serves."""
         inverter_type = self.inverter_type
-        served = [
+        assert inverter_type is not None  # settled just above
+        return [
             name
-            for name in _POLLED
+            for name in names
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
-        self._polled = self._pool(served)
 
     def _pool(self, served: list[str]) -> list[str]:
         """The poll list, with each served run of _POOLS replaced by its group."""
@@ -162,38 +178,62 @@ class SofarLegacyInverter:
                 polled.append(entry)
         return polled
 
-    async def async_update(self) -> UpdateReport:
-        """Refresh every sub-system this inverter serves, one at a time.
+    async def async_update_readings(self) -> UpdateReport:
+        """Refresh what the inverter measures: PV, grid, battery, yield.
 
-        Same contract as :meth:`sofar_modbus.SofarInverter.async_update`: a
+        The first call sets the inverter up.
+        """
+        if self._readings is None:
+            await self.async_setup()
+        assert self._readings is not None  # async_setup() builds it
+        return await self._async_poll(self._readings, UpdateReport(set(), {}))
+
+    async def async_update_settings(self) -> UpdateReport:
+        """Refresh what is configured, plus the identity.
+
+        This generation has almost nothing here — the serial number, and an
+        AC-coupled inverter's battery floor — and none of it changes on its own,
+        so a caller polls it rarely. The first call sets the inverter up.
+        """
+        if self._settings is None:
+            await self.async_setup()
+        assert self._settings is not None  # async_setup() builds it
+        return await self._async_poll(self._settings, UpdateReport(set(), {}))
+
+    async def async_update(self) -> UpdateReport:
+        """Refresh readings and settings together, in one report."""
+        report = await self.async_update_readings()
+        assert self._settings is not None  # the readings poll set the inverter up
+        return await self._async_poll(self._settings, report)
+
+    async def _async_poll(self, names: list[str], report: UpdateReport) -> UpdateReport:
+        """Read each sub-system on its own, adding what happened to ``report``.
+
+        Same contract as :meth:`sofar_modbus.SofarInverter._async_poll`: a
         failed component keeps its previous values and is reported, listeners
         fire after the whole poll and only for refreshed components, and a
         dead link raises ``ModbusConnectionError`` — as does a timeout before
         anything answered.
         """
-        if self._polled is None:
-            await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
-        updated: set[str] = set()
-        failed: dict[str, ModbusError] = {}
-        for name in self._polled:
+        for name in names:
             target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
             try:
                 await target.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusTimeoutError as err:
-                if not updated and not failed:
+                if not report.updated and not report.failed:
                     raise  # nothing answered at all: assume the rest time out too
-                failed[name] = err
+                report.failed[name] = err
             except ModbusError as err:
-                failed[name] = err
+                report.failed[name] = err
             else:
-                updated.add(name)
-        for name in updated:
-            fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
-            fresh.notify()
-        return UpdateReport(updated, failed)
+                report.updated.add(name)
+        for name in names:
+            if name in report.updated:
+                fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
+                fresh.notify()
+        return report
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
         """Every register this inverter reads, undecoded — for diagnostics.
@@ -203,11 +243,11 @@ class SofarLegacyInverter:
         inverter does not serve stay out. Nothing notifies: a download is not a
         poll. The first call sets the inverter up.
         """
-        if self._polled is None:
+        if self._readings is None:
             await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
+        assert self._readings is not None and self._settings is not None
         raw: dict[str, dict[int, int | bool]] = {}
-        for name in self._polled:
+        for name in (*self._readings, *self._settings):
             target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
             for space, values in (await target.async_read_raw(notify=False)).items():
                 raw.setdefault(space, {}).update(values)

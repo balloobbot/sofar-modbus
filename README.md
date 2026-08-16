@@ -69,7 +69,7 @@ The exception is a run of registers several sub-systems tile — the older
 generation's storage block and its three-phase PV block — where a read of one
 already spans the others, so they are pooled into that single request and
 reported under one name (`storage_block`, `pv_block`).
-`async_update()` returns an `UpdateReport` — a failed component keeps its
+Every update method returns an `UpdateReport` — a failed component keeps its
 previous values, does not notify its listeners, and is listed by attribute
 name with its error, while every other component refreshes and notifies once
 the whole poll is done. A dead link (`ModbusConnectionError`) raises, and so
@@ -81,6 +81,39 @@ report = await inverter.async_update()
 for name, error in report.failed.items():
     print(f"{name} kept its previous values: {error}")
 ```
+
+### Measurements and settings refresh separately
+
+Both device objects split their poll by what it reads, under the same names:
+
+- `async_update_readings()` — what the inverter measures: power, yield, battery,
+  state, faults.
+- `async_update_settings()` — what it has been configured to do, plus the
+  identity: registers that change when something writes them, not on their own.
+- `async_update()` — both, in one merged report, for a caller that does not want
+  to schedule them apart.
+
+A report names only what the method it came from polled, and listeners fire at
+the end of the poll that read them, so a settings poll does not hold up the
+measurements. A settings poll is also how a write is read back: run one after
+writing a register to see what took effect.
+
+```python
+await inverter.async_update_readings()  # every cycle
+await inverter.async_update_settings()  # rarely, and after a write
+```
+
+On a `SofarInverter` this is worth scheduling: a three-phase HYD hybrid polls
+276 registers in 31 blocks, of which the settings are 65 registers in 13 blocks
+— the 0x1000 settings block, and `identity`, which holds a serial number,
+firmware versions and the clock `async_set_time()` writes. A single-phase KTL-M
+splits 135 registers in 11 blocks into 110 read and 25 configured.
+
+`SofarLegacyInverter` has the same three methods so that a caller can treat both
+generations alike, but there is far less to gain: the generation is read-only,
+so its settings poll is the serial number (one request of the four a storage
+inverter makes, reading a string that never changes) plus, on an AC-coupled
+inverter, the one battery-floor register at 0x104D.
 
 Writing works the same way — a plain field write for the registers that take
 one, and a method for the registers the device insists on receiving as a block:

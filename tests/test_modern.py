@@ -54,13 +54,13 @@ async def test_setup_reads_the_serial_and_settles_the_model(
     assert hybrid.has_battery_tower is True
 
 
-async def test_polled_components_mirrors_the_private_list(
+async def test_polled_components_covers_both_poll_lists(
     hybrid: SofarInverter,
 ) -> None:
     assert hybrid.polled_components is None
     await hybrid.async_update()
-    assert hybrid._polled is not None
-    assert hybrid.polled_components == tuple(hybrid._polled)
+    assert hybrid._readings is not None and hybrid._settings is not None
+    assert hybrid.polled_components == tuple(hybrid._readings + hybrid._settings)
 
 
 async def test_prime_sets_up_polling_like_async_setup_would(
@@ -80,7 +80,7 @@ async def test_prime_sets_up_polling_like_async_setup_would(
     assert primed.serial_number == HYBRID_SERIAL
     assert primed.model == "HYDxxKTL-3P"
     assert primed.inverter_type == hybrid.inverter_type
-    assert primed._polled == hybrid._polled
+    assert primed.polled_components == hybrid.polled_components
 
 
 def test_prime_requires_inverter_type_from_the_constructor(
