@@ -147,11 +147,11 @@ class SofarInverter:
         self._options = (EPS if read_eps else InverterType(0)) | (
             PM if read_pm else InverterType(0)
         )
-        self.inverter_type: InverterType | None = None
-        self.model: str | None = model
-        self.serial_number: str | None = serial_number
-        if inverter_type is not None:
-            self.inverter_type = inverter_type | self._options
+        self.model = model
+        self.serial_number = serial_number
+        self.inverter_type = (
+            inverter_type | self._options if inverter_type is not None else None
+        )
 
         self.state = InverterState(unit)
         self.identity = Identity(unit)
@@ -184,7 +184,6 @@ class SofarInverter:
         # Read one pack at a time through async_read_pack(), never with the poll.
         self.battery_pack = BatteryPack(unit)
 
-        # The poll list of each update method; None until the inverter is set up.
         self._readings: list[str] | None = None
         self._settings: list[str] | None = None
 

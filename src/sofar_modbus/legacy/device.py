@@ -83,10 +83,10 @@ class SofarLegacyInverter:
     ) -> None:
         self._unit = unit
         self._options = EPS if read_eps else InverterType(0)
-        self.inverter_type: InverterType | None = None
-        self.serial_number: str | None = serial_number
-        if inverter_type is not None:
-            self.inverter_type = inverter_type | self._options
+        self.serial_number = serial_number
+        self.inverter_type = (
+            inverter_type | self._options if inverter_type is not None else None
+        )
 
         self.identity = LegacyIdentity(unit)
         self.pv_common = PvCommon(unit)
@@ -120,32 +120,25 @@ class SofarLegacyInverter:
             self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
-        self._polled = self._pool(
-            self._served(
-                (
-                    "identity",
-                    "pv_common",
-                    "pv_single_phase",
-                    "pv_three_phase",
-                    "storage",
-                    "storage_three_phase",
-                    "storage_eps",
-                    "hybrid_pv_1",
-                    "hybrid_pv_2",
-                    "battery_settings",
-                )
-            )
-        )
-
-    def _served(self, names: tuple[str, ...]) -> list[str]:
-        """Those of ``names`` this inverter's model actually serves."""
         inverter_type = self.inverter_type
-        assert inverter_type is not None  # settled just above
-        return [
+        assert inverter_type is not None
+        served = [
             name
-            for name in names
+            for name in (
+                "identity",
+                "pv_common",
+                "pv_single_phase",
+                "pv_three_phase",
+                "storage",
+                "storage_three_phase",
+                "storage_eps",
+                "hybrid_pv_1",
+                "hybrid_pv_2",
+                "battery_settings",
+            )
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
+        self._polled = self._pool(served)
 
     def _pool(self, served: list[str]) -> list[str]:
         """The poll list, with each served run of _POOLS replaced by its group."""
