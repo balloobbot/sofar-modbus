@@ -56,44 +56,6 @@ if TYPE_CHECKING:
 SERIAL_REGISTER = 0x0445
 SERIAL_WORDS = 7
 
-# What the inverter measures, in read order. battery_pack is absent: its packs
-# share one register block and are read via async_read_pack().
-_READINGS = (
-    "state",
-    "grid",
-    "offgrid",
-    "offgrid_single_phase",
-    "offgrid_three_phase",
-    "pv_1_2",
-    "pv_3",
-    "pv_4",
-    "pv_5_6",
-    "pv_7_8",
-    "pv_9_10",
-    "battery_1_2",
-    "battery_3_8",
-    "battery_totals",
-    "energy",
-    "battery_energy",
-)
-
-# What the inverter has been configured to do, in read order. identity is here
-# because nothing in it is measured: a serial number, firmware versions, and
-# the clock async_set_time() writes.
-_SETTINGS = (
-    "identity",
-    "rtc_sync",
-    "feed_in",
-    "eps",
-    "battery_active_control",
-    "parallel",
-    "battery_config_id",
-    "battery_config",
-    "remote",
-    "active_power_control",
-    "charger",
-    "passive",
-)
 _SET_TIME_REGISTER = 0x1004
 _IV_CURVE_SCAN_REGISTER = 0x1027
 
@@ -162,6 +124,45 @@ class SofarInverter:
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
     """
+
+    # What the inverter measures, in read order. battery_pack is absent: its packs
+    # share one register block and are read via async_read_pack().
+    _READINGS = (
+        "state",
+        "grid",
+        "offgrid",
+        "offgrid_single_phase",
+        "offgrid_three_phase",
+        "pv_1_2",
+        "pv_3",
+        "pv_4",
+        "pv_5_6",
+        "pv_7_8",
+        "pv_9_10",
+        "battery_1_2",
+        "battery_3_8",
+        "battery_totals",
+        "energy",
+        "battery_energy",
+    )
+
+    # What the inverter has been configured to do, in read order. identity is here
+    # because nothing in it is measured: a serial number, firmware versions, and
+    # the clock async_set_time() writes.
+    _SETTINGS = (
+        "identity",
+        "rtc_sync",
+        "feed_in",
+        "eps",
+        "battery_active_control",
+        "parallel",
+        "battery_config_id",
+        "battery_config",
+        "remote",
+        "active_power_control",
+        "charger",
+        "passive",
+    )
 
     def __init__(
         self,
@@ -262,8 +263,8 @@ class SofarInverter:
             self.model = model
         elif model is not None:
             self.model = model
-        self._readings = self._served(_READINGS)
-        self._settings = self._served(_SETTINGS)
+        self._readings = self._served(self._READINGS)
+        self._settings = self._served(self._SETTINGS)
 
     def prime(self, serial_number: str, model: str | None) -> None:
         """Set up polling from an already-known identity.
@@ -282,15 +283,18 @@ class SofarInverter:
             )
         self.serial_number = serial_number
         self.model = model
-        self._readings = self._served(_READINGS)
-        self._settings = self._served(_SETTINGS)
+        self._readings = self._served(self._READINGS)
+        self._settings = self._served(self._SETTINGS)
 
     async def async_update_readings(self) -> UpdateReport:
         """Refresh what the inverter measures: power, energy, battery, state.
 
         The first call sets the inverter up.
         """
-        return await self._async_poll("_readings")
+        if self._readings is None:
+            await self.async_setup()
+            assert self._readings is not None
+        return await self._async_poll(self._readings)
 
     async def async_update_settings(self) -> UpdateReport:
         """Refresh what is configured: charger mode, limits, battery config.
@@ -299,7 +303,10 @@ class SofarInverter:
         that polls them at all polls them rarely — and reads them straight after
         writing one. The first call sets the inverter up.
         """
-        return await self._async_poll("_settings")
+        if self._settings is None:
+            await self.async_setup()
+            assert self._settings is not None
+        return await self._async_poll(self._settings)
 
     async def async_update(self) -> UpdateReport:
         """Refresh readings and settings together, in one report.
@@ -307,11 +314,12 @@ class SofarInverter:
         For a caller that does not want to schedule the two apart.
         """
         report = await self.async_update_readings()
-        return await self._async_poll("_settings", report)
+        assert self._settings is not None
+        return await self._async_poll(self._settings, report)
 
     async def _async_poll(
         self,
-        names: Sequence[str] | str,
+        targets: Sequence[str],
         report: UpdateReport | None = None,
     ) -> UpdateReport:
         """Read each component on its own, adding what happened to ``report``.
@@ -324,10 +332,6 @@ class SofarInverter:
         reporting, and so does a timeout before anything has answered: a silent
         inverter is not walked component by component, paying a timeout for each.
         """
-        if self._readings is None or self._settings is None:
-            await self.async_setup()
-            assert self._readings is not None and self._settings is not None
-        targets = getattr(self, names) if isinstance(names, str) else names
         if report is None:
             report = UpdateReport(set(), {})
         for name in targets:
