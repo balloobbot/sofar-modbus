@@ -73,30 +73,18 @@ class SofarLegacyInverter:
     RTU-over-TCP connection.
     """
 
-    _POLLED = (
-        "identity",
-        "pv_common",
-        "pv_single_phase",
-        "pv_three_phase",
-        "storage",
-        "storage_three_phase",
-        "storage_eps",
-        "hybrid_pv_1",
-        "hybrid_pv_2",
-        "battery_settings",
-    )
-
     def __init__(
         self,
         unit: ModbusUnit,
         *,
+        serial_number: str | None = None,
         inverter_type: InverterType | None = None,
         read_eps: bool = False,
     ) -> None:
         self._unit = unit
         self._options = EPS if read_eps else InverterType(0)
         self.inverter_type: InverterType | None = None
-        self.serial_number: str | None = None
+        self.serial_number: str | None = serial_number
         if inverter_type is not None:
             self.inverter_type = inverter_type | self._options
 
@@ -124,22 +112,30 @@ class SofarLegacyInverter:
         present = [p for p in powers if p is not None]
         return sum(present) if present else None
 
-    @property
-    def polled_components(self) -> tuple[str, ...] | None:
-        """Every component name this inverter serves, in poll order.
-
-        None until `async_setup()` has run.
-        """
-        return tuple(self._polled) if self._polled is not None else None
-
     async def async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll."""
-        words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
-        # The plugin strips the punctuation these boards pad the field with.
-        self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
+        if self.serial_number is None:
+            words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
+            # The plugin strips the punctuation these boards pad the field with.
+            self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
-        self._polled = self._pool(self._served(self._POLLED))
+        self._polled = self._pool(
+            self._served(
+                (
+                    "identity",
+                    "pv_common",
+                    "pv_single_phase",
+                    "pv_three_phase",
+                    "storage",
+                    "storage_three_phase",
+                    "storage_eps",
+                    "hybrid_pv_1",
+                    "hybrid_pv_2",
+                    "battery_settings",
+                )
+            )
+        )
 
     def _served(self, names: tuple[str, ...]) -> list[str]:
         """Those of ``names`` this inverter's model actually serves."""

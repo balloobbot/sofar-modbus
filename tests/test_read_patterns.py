@@ -49,7 +49,18 @@ def legacy_served(
     """Every component this inverter polls, named — pools flattened to members."""
     assert inverter.inverter_type is not None  # settled by the first update
     served = []
-    for name in inverter._POLLED:
+    for name in (
+        "identity",
+        "pv_common",
+        "pv_single_phase",
+        "pv_three_phase",
+        "storage",
+        "storage_three_phase",
+        "storage_eps",
+        "hybrid_pv_1",
+        "hybrid_pv_2",
+        "battery_settings",
+    ):
         component: SofarLegacyComponent = getattr(inverter, name)
         if matches(inverter.inverter_type, component.applies_to):
             served.append((name, component))

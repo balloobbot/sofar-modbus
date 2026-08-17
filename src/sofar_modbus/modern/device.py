@@ -125,49 +125,12 @@ class SofarInverter:
     RTU-over-TCP connection.
     """
 
-    # What the inverter measures, in read order. battery_pack is absent: its packs
-    # share one register block and are read via async_read_pack().
-    _READINGS = (
-        "state",
-        "grid",
-        "offgrid",
-        "offgrid_single_phase",
-        "offgrid_three_phase",
-        "pv_1_2",
-        "pv_3",
-        "pv_4",
-        "pv_5_6",
-        "pv_7_8",
-        "pv_9_10",
-        "battery_1_2",
-        "battery_3_8",
-        "battery_totals",
-        "energy",
-        "battery_energy",
-    )
-
-    # What the inverter has been configured to do, in read order. identity is here
-    # because nothing in it is measured: a serial number, firmware versions, and
-    # the clock async_set_time() writes.
-    _SETTINGS = (
-        "identity",
-        "rtc_sync",
-        "feed_in",
-        "eps",
-        "battery_active_control",
-        "parallel",
-        "battery_config_id",
-        "battery_config",
-        "remote",
-        "active_power_control",
-        "charger",
-        "passive",
-    )
-
     def __init__(
         self,
         unit: ModbusUnit,
         *,
+        serial_number: str | None = None,
+        model: str | None = None,
         inverter_type: InverterType | None = None,
         read_eps: bool = False,
         read_pm: bool = False,
@@ -176,16 +139,17 @@ class SofarInverter:
 
         ``read_eps`` and ``read_pm`` mirror the integration's options: the
         off-grid and parallel-system registers are only read when asked for,
-        because an inverter without them refuses the blocks. ``inverter_type``
-        skips serial-number detection for a device the table does not know.
+        because an inverter without them refuses the blocks. ``serial_number``,
+        ``model`` and ``inverter_type`` allow callers that already know the device's
+        identity to pass them in and skip reading the serial number over Modbus.
         """
         self._unit = unit
         self._options = (EPS if read_eps else InverterType(0)) | (
             PM if read_pm else InverterType(0)
         )
         self.inverter_type: InverterType | None = None
-        self.model: str | None = None
-        self.serial_number: str | None = None
+        self.model: str | None = model
+        self.serial_number: str | None = serial_number
         if inverter_type is not None:
             self.inverter_type = inverter_type | self._options
 
@@ -233,7 +197,7 @@ class SofarInverter:
     def polled_components(self) -> tuple[str, ...] | None:
         """Every component name this inverter serves, readings then settings.
 
-        None until `async_setup()` or `prime()` has run.
+        None until `async_setup()` has run.
         """
         if self._readings is None or self._settings is None:
             return None
@@ -249,7 +213,7 @@ class SofarInverter:
         whole map is telemetry, like :class:`~sofar_modbus.SofarLegacyInverter`,
         has no settings poll and so does not offer this.
 
-        None until `async_setup()` or `prime()` has run.
+        None until `async_setup()` has run.
         """
         return tuple(self._settings) if self._settings is not None else None
 
@@ -269,36 +233,56 @@ class SofarInverter:
         Run by the first update if the caller does not run it itself. A failure
         leaves the device unset up, so the next update retries.
         """
-        words = await self._unit.read_holding_registers(SERIAL_REGISTER, SERIAL_WORDS)
-        self.serial_number = decode_string(words)
-        detected, model = identify(self.serial_number)
-        if self.inverter_type is None:
-            self.inverter_type = detected | self._options
-            self.model = model
-        elif model is not None:
-            self.model = model
-        self._readings = self._served(self._READINGS)
-        self._settings = self._served(self._SETTINGS)
-
-    def prime(self, serial_number: str, model: str | None) -> None:
-        """Set up polling from an already-known identity.
-
-        Skips the serial-number read `async_setup()` would otherwise need, for
-        callers that already know a device's identity from a previous probe
-        (e.g. a Home Assistant config entry's unique_id) and want to avoid
-        blocking on I/O to re-read it. `inverter_type` must already be set on
-        this instance -- pass it to the constructor. Mirrors `async_setup()`'s
-        post-read bookkeeping exactly.
-        """
-        if self.inverter_type is None:
-            raise ValueError(
-                "prime() requires inverter_type to already be set "
-                "(pass it to the constructor)"
+        if self.serial_number is None:
+            words = await self._unit.read_holding_registers(
+                SERIAL_REGISTER, SERIAL_WORDS
             )
-        self.serial_number = serial_number
-        self.model = model
-        self._readings = self._served(self._READINGS)
-        self._settings = self._served(self._SETTINGS)
+            self.serial_number = decode_string(words)
+        if self.inverter_type is None:
+            detected, model = identify(self.serial_number)
+            self.inverter_type = detected | self._options
+            if self.model is None:
+                self.model = model
+        elif self.model is None:
+            _, model = identify(self.serial_number)
+            if model is not None:
+                self.model = model
+        self._readings = self._served(
+            (
+                "state",
+                "grid",
+                "offgrid",
+                "offgrid_single_phase",
+                "offgrid_three_phase",
+                "pv_1_2",
+                "pv_3",
+                "pv_4",
+                "pv_5_6",
+                "pv_7_8",
+                "pv_9_10",
+                "battery_1_2",
+                "battery_3_8",
+                "battery_totals",
+                "energy",
+                "battery_energy",
+            )
+        )
+        self._settings = self._served(
+            (
+                "identity",
+                "rtc_sync",
+                "feed_in",
+                "eps",
+                "battery_active_control",
+                "parallel",
+                "battery_config_id",
+                "battery_config",
+                "remote",
+                "active_power_control",
+                "charger",
+                "passive",
+            )
+        )
 
     async def async_update_readings(self) -> UpdateReport:
         """Refresh what the inverter measures: power, energy, battery, state.

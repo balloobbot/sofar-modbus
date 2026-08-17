@@ -81,32 +81,28 @@ async def test_settings_components_names_what_the_settings_poll_reads(
     assert set(polled) - set(split) == readings.updated | set(readings.failed)
 
 
-async def test_prime_sets_up_polling_like_async_setup_would(
+async def test_constructor_identity_skips_serial_number_read(
     hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
 ) -> None:
-    """A caller that already knows the identity can skip the I/O in async_setup()."""
-    await hybrid.async_update()  # the real thing prime() is meant to mirror
+    """Identity passed to the constructor skips the serial-number read."""
+    await hybrid.async_update()
 
-    primed = SofarInverter(
+    mock_modbus_unit.read_events.clear()
+    device = SofarInverter(
         mock_modbus_unit,
+        serial_number=HYBRID_SERIAL,
+        model="HYDxxKTL-3P",
         inverter_type=HYBRID | X3 | GEN | BAT_BTS,
         read_eps=True,
         read_pm=True,
     )
-    primed.prime(HYBRID_SERIAL, "HYDxxKTL-3P")
+    await device.async_setup()
 
-    assert primed.serial_number == HYBRID_SERIAL
-    assert primed.model == "HYDxxKTL-3P"
-    assert primed.inverter_type == hybrid.inverter_type
-    assert primed.polled_components == hybrid.polled_components
-
-
-def test_prime_requires_inverter_type_from_the_constructor(
-    mock_modbus_unit: MockModbusUnit,
-) -> None:
-    device = SofarInverter(mock_modbus_unit)
-    with pytest.raises(ValueError, match="prime\\(\\) requires inverter_type"):
-        device.prime(HYBRID_SERIAL, "HYDxxKTL-3P")
+    assert not mock_modbus_unit.read_events  # no serial number register read
+    assert device.serial_number == HYBRID_SERIAL
+    assert device.model == "HYDxxKTL-3P"
+    assert device.inverter_type == hybrid.inverter_type
+    assert device.polled_components == hybrid.polled_components
 
 
 async def test_state_and_faults(hybrid: SofarInverter) -> None:
