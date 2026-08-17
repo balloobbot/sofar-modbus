@@ -192,45 +192,11 @@ class SofarInverter:
         """Whether this inverter reports a BTS battery tower."""
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
 
-    @property
-    def polled_components(self) -> tuple[str, ...] | None:
-        """Every component name this inverter serves, readings then settings.
-
-        None until `async_setup()` has run.
-        """
-        if self._readings is None or self._settings is None:
-            return None
-        return tuple(self._readings) + tuple(self._settings)
-
-    @property
-    def settings_components(self) -> tuple[str, ...] | None:
-        """Which of ``polled_components`` ``async_update_settings()`` reads.
-
-        The rest are what ``async_update_readings()`` reads. For a caller that
-        schedules the two apart and has to route per component — it should not
-        have to keep its own copy of the split to do that. A device class whose
-        whole map is telemetry, like :class:`~sofar_modbus.SofarLegacyInverter`,
-        has no settings poll and so does not offer this.
-
-        None until `async_setup()` has run.
-        """
-        return tuple(self._settings) if self._settings is not None else None
-
-    def _served(self, names: tuple[str, ...]) -> list[str]:
-        """Those of ``names`` this inverter's model actually serves."""
-        inverter_type = self.inverter_type
-        assert inverter_type is not None  # settled before either caller runs
-        return [
-            name
-            for name in names
-            if matches(inverter_type, getattr(self, name).applies_to)
-        ]
-
-    async def async_setup(self) -> None:
+    async def _async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll.
 
-        Run by the first update if the caller does not run it itself. A failure
-        leaves the device unset up, so the next update retries.
+        Run by the first update if not already set up. A failure leaves the
+        device unset up, so the next update retries.
         """
         if self.serial_number is None:
             words = await self._unit.read_holding_registers(
@@ -246,8 +212,11 @@ class SofarInverter:
             _, model = identify(self.serial_number)
             if model is not None:
                 self.model = model
-        self._readings = self._served(
-            (
+        inverter_type = self.inverter_type
+        assert inverter_type is not None
+        self._readings = [
+            name
+            for name in (
                 "state",
                 "grid",
                 "offgrid",
@@ -265,9 +234,11 @@ class SofarInverter:
                 "energy",
                 "battery_energy",
             )
-        )
-        self._settings = self._served(
-            (
+            if matches(inverter_type, getattr(self, name).applies_to)
+        ]
+        self._settings = [
+            name
+            for name in (
                 "identity",
                 "rtc_sync",
                 "feed_in",
@@ -281,7 +252,8 @@ class SofarInverter:
                 "charger",
                 "passive",
             )
-        )
+            if matches(inverter_type, getattr(self, name).applies_to)
+        ]
 
     async def async_update_readings(self) -> UpdateReport:
         """Refresh what the inverter measures: power, energy, battery, state.
@@ -289,7 +261,7 @@ class SofarInverter:
         The first call sets the inverter up.
         """
         if self._readings is None:
-            await self.async_setup()
+            await self._async_setup()
             assert self._readings is not None
         return await self._async_poll(self._readings)
 
@@ -301,7 +273,7 @@ class SofarInverter:
         writing one. The first call sets the inverter up.
         """
         if self._settings is None:
-            await self.async_setup()
+            await self._async_setup()
             assert self._settings is not None
         return await self._async_poll(self._settings)
 
@@ -362,12 +334,11 @@ class SofarInverter:
         :meth:`async_read_pack`. Nothing notifies: a download is not a poll.
         The first call sets the inverter up.
         """
-        if self._readings is None:
-            await self.async_setup()
-        polled = self.polled_components
-        assert polled is not None  # async_setup() builds it
+        if self._readings is None or self._settings is None:
+            await self._async_setup()
+            assert self._readings is not None and self._settings is not None
         raw: dict[str, dict[int, int | bool]] = {}
-        for name in polled:
+        for name in (*self._readings, *self._settings):
             component: SofarComponent = getattr(self, name)
             for space, values in (await component.async_read_raw(notify=False)).items():
                 raw.setdefault(space, {}).update(values)

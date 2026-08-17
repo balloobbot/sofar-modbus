@@ -109,14 +109,9 @@ and `identity`, which holds a serial number, firmware versions and the clock
 `async_set_time()` writes. A single-phase KTL-M splits 135 registers in 11 blocks into
 110 read and 25 configured.
 
-`inverter.settings_components` names which of `polled_components` the settings
-poll reads, so a caller that attaches something per component — a Home Assistant
-entity, say — can ask which poll refreshes it instead of keeping its own copy of
-the split. Both are `None` until setup has run.
-
 `SofarLegacyInverter` has no writable settings, so it refreshes all of its
-served components in one pass through `async_update()`, and offers neither the
-two split methods nor `settings_components`.
+served components in one pass through `async_update()`, and does not offer the
+two split update methods.
 
 Writing works the same way — a plain field write for the registers that take
 one, and a method for the registers the device insists on receiving as a block:

@@ -112,7 +112,7 @@ class SofarLegacyInverter:
         present = [p for p in powers if p is not None]
         return sum(present) if present else None
 
-    async def async_setup(self) -> None:
+    async def _async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll."""
         if self.serial_number is None:
             words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
@@ -171,7 +171,7 @@ class SofarLegacyInverter:
         anything answered.
         """
         if self._polled is None:
-            await self.async_setup()
+            await self._async_setup()
             assert self._polled is not None
         updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
@@ -204,7 +204,7 @@ class SofarLegacyInverter:
         poll. The first call sets the inverter up.
         """
         if self._polled is None:
-            await self.async_setup()
+            await self._async_setup()
             assert self._polled is not None
         raw: dict[str, dict[int, int | bool]] = {}
         for name in self._polled:

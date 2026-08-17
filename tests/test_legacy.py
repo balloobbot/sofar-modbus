@@ -31,7 +31,7 @@ async def test_setup_strips_the_padding_the_boards_add(
     """The plugin runs the serial through a character filter; so do we."""
     mock_modbus_unit.input[0x2002] = ascii_words("SM1E\x01234567\x02", 6)
     inverter = SofarLegacyInverter(mock_modbus_unit)
-    await inverter.async_setup()
+    await inverter._async_setup()
     assert inverter.serial_number == "SM1E234567"
     assert inverter.inverter_type == HYBRID | X1
 
@@ -180,7 +180,7 @@ async def test_constructor_identity_skips_serial_number_read(
         inverter_type=HYBRID | X1,
         read_eps=True,
     )
-    await device.async_setup()
+    await device._async_setup()
 
     assert not mock_modbus_unit.read_events  # no serial number register read
     assert device.serial_number == LEGACY_HYBRID_SERIAL

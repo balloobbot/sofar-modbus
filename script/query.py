@@ -42,14 +42,7 @@ Inverter = SofarInverter | SofarLegacyInverter
 
 
 def served_components(inverter: Inverter) -> list[tuple[str, Component]]:
-    """The components this inverter serves, in poll order."""
-    if isinstance(inverter, SofarInverter):
-        # battery_pack is not in here: a tower answers for one pack at a time.
-        names = inverter.polled_components or ()
-        return [(name, getattr(inverter, name)) for name in names]
-
-    # The legacy poll list names ComponentGroups, which print_component does not
-    # take, so walk the components themselves and keep the served ones.
+    """The components this inverter serves."""
     inverter_type = inverter.inverter_type
     assert inverter_type is not None  # the update below set the inverter up
     return [

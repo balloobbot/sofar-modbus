@@ -54,31 +54,16 @@ async def test_setup_reads_the_serial_and_settles_the_model(
     assert hybrid.has_battery_tower is True
 
 
-async def test_polled_components_covers_both_poll_lists(
+async def test_readings_and_settings_polls_are_disjoint(
     hybrid: SofarInverter,
 ) -> None:
-    assert hybrid.polled_components is None
-    await hybrid.async_update()
-    assert hybrid._readings is not None and hybrid._settings is not None
-    assert hybrid.polled_components == tuple(hybrid._readings + hybrid._settings)
-
-
-async def test_settings_components_names_what_the_settings_poll_reads(
-    hybrid: SofarInverter,
-) -> None:
-    """The accessor is the split itself, not a copy of it.
-
-    A caller routing per component cannot drift from what each poll touches.
-    """
-    assert hybrid.settings_components is None
+    """The readings poll and settings poll touch separate components."""
     settings = await hybrid.async_update_settings()
     readings = await hybrid.async_update_readings()
 
-    split = hybrid.settings_components
-    polled = hybrid.polled_components
-    assert split is not None and polled is not None  # settled by the polls above
-    assert set(split) == settings.updated | set(settings.failed)
-    assert set(polled) - set(split) == readings.updated | set(readings.failed)
+    assert not (settings.updated & readings.updated)
+    assert not (settings.updated & set(readings.failed))
+    assert not (set(settings.failed) & readings.updated)
 
 
 async def test_constructor_identity_skips_serial_number_read(
@@ -96,13 +81,14 @@ async def test_constructor_identity_skips_serial_number_read(
         read_eps=True,
         read_pm=True,
     )
-    await device.async_setup()
+    await device._async_setup()
 
     assert not mock_modbus_unit.read_events  # no serial number register read
     assert device.serial_number == HYBRID_SERIAL
     assert device.model == "HYDxxKTL-3P"
     assert device.inverter_type == hybrid.inverter_type
-    assert device.polled_components == hybrid.polled_components
+    assert device._readings == hybrid._readings
+    assert device._settings == hybrid._settings
 
 
 async def test_state_and_faults(hybrid: SofarInverter) -> None:
