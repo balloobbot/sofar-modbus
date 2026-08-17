@@ -54,14 +54,8 @@ async def test_listeners_fire_at_the_end_and_only_for_fresh_components(
     mock_modbus_unit.read_events.clear()
     await hybrid.async_update()
 
-    # One notification, after every reading was tried; none for the failure. The
-    # settings poll that follows is its own, and does not hold it up.
-    settings_start = next(
-        i
-        for i, event in enumerate(mock_modbus_unit.read_events)
-        if event.address == 0x042C
-    )
-    assert seen == [settings_start]
+    # One notification, after the whole poll was tried; none for the failure.
+    assert seen == [len(mock_modbus_unit.read_events)]
 
 
 async def test_a_dead_link_raises_instead_of_reporting(

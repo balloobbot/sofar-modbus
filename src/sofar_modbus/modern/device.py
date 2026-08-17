@@ -254,12 +254,20 @@ class SofarInverter:
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
 
+    def _notify(self, report: UpdateReport) -> None:
+        """Fire listeners on every component that successfully refreshed."""
+        for name in report.updated:
+            fresh: SofarComponent = getattr(self, name)
+            fresh.notify()
+
     async def async_update_readings(self) -> UpdateReport:
         """Refresh telemetry measurements (power, energy, battery, state)."""
         if self._readings is None:
             await self._async_setup()
             assert self._readings is not None
-        return await self._async_poll(self._readings)
+        report = await self._async_poll(self._readings)
+        self._notify(report)
+        return report
 
     async def async_update_settings(self) -> UpdateReport:
         """Refresh configuration registers (charger mode, limits, battery config).
@@ -269,13 +277,19 @@ class SofarInverter:
         if self._settings is None:
             await self._async_setup()
             assert self._settings is not None
-        return await self._async_poll(self._settings)
+        report = await self._async_poll(self._settings)
+        self._notify(report)
+        return report
 
     async def async_update(self) -> UpdateReport:
         """Refresh readings and settings together in one report."""
-        report = await self.async_update_readings()
-        assert self._settings is not None
-        return await self._async_poll(self._settings, report)
+        if self._readings is None or self._settings is None:
+            await self._async_setup()
+            assert self._readings is not None and self._settings is not None
+        report = await self._async_poll(self._readings)
+        await self._async_poll(self._settings, report)
+        self._notify(report)
+        return report
 
     async def _async_poll(
         self,
@@ -286,11 +300,10 @@ class SofarInverter:
 
         Components are read independently, the way the integration reads its
         blocks: a sub-system whose read fails keeps its previous values while
-        the rest still refresh. Listeners fire only after every component of
-        this poll has been tried, and only on the ones that refreshed. A failure
-        of the link itself raises ``ModbusConnectionError`` instead of
-        reporting, and so does a timeout before anything has answered: a silent
-        inverter is not walked component by component, paying a timeout for each.
+        the rest still refresh. A failure of the link itself raises
+        ``ModbusConnectionError`` instead of reporting, and so does a timeout
+        before anything has answered: a silent inverter is not walked component
+        by component, paying a timeout for each.
         """
         if report is None:
             report = UpdateReport(set(), {})
@@ -308,10 +321,6 @@ class SofarInverter:
                 report.failed[name] = err
             else:
                 report.updated.add(name)
-        for name in targets:
-            if name in report.updated:
-                fresh: SofarComponent = getattr(self, name)
-                fresh.notify()
         return report
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
