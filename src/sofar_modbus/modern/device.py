@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -289,10 +290,7 @@ class SofarInverter:
 
         The first call sets the inverter up.
         """
-        if self._readings is None:
-            await self.async_setup()
-        assert self._readings is not None  # async_setup() builds it
-        return await self._async_poll(self._readings, UpdateReport(set(), {}))
+        return await self._async_poll("_readings")
 
     async def async_update_settings(self) -> UpdateReport:
         """Refresh what is configured: charger mode, limits, battery config.
@@ -301,10 +299,7 @@ class SofarInverter:
         that polls them at all polls them rarely — and reads them straight after
         writing one. The first call sets the inverter up.
         """
-        if self._settings is None:
-            await self.async_setup()
-        assert self._settings is not None  # async_setup() builds it
-        return await self._async_poll(self._settings, UpdateReport(set(), {}))
+        return await self._async_poll("_settings")
 
     async def async_update(self) -> UpdateReport:
         """Refresh readings and settings together, in one report.
@@ -312,10 +307,13 @@ class SofarInverter:
         For a caller that does not want to schedule the two apart.
         """
         report = await self.async_update_readings()
-        assert self._settings is not None  # the readings poll set the inverter up
-        return await self._async_poll(self._settings, report)
+        return await self._async_poll("_settings", report)
 
-    async def _async_poll(self, names: list[str], report: UpdateReport) -> UpdateReport:
+    async def _async_poll(
+        self,
+        names: Sequence[str] | str,
+        report: UpdateReport | None = None,
+    ) -> UpdateReport:
         """Read each component on its own, adding what happened to ``report``.
 
         Components are read independently, the way the integration reads its
@@ -326,7 +324,13 @@ class SofarInverter:
         reporting, and so does a timeout before anything has answered: a silent
         inverter is not walked component by component, paying a timeout for each.
         """
-        for name in names:
+        if self._readings is None or self._settings is None:
+            await self.async_setup()
+            assert self._readings is not None and self._settings is not None
+        targets = getattr(self, names) if isinstance(names, str) else names
+        if report is None:
+            report = UpdateReport(set(), {})
+        for name in targets:
             component: SofarComponent = getattr(self, name)
             try:
                 await component.async_update(notify=False)
@@ -340,7 +344,7 @@ class SofarInverter:
                 report.failed[name] = err
             else:
                 report.updated.add(name)
-        for name in names:
+        for name in targets:
             if name in report.updated:
                 fresh: SofarComponent = getattr(self, name)
                 fresh.notify()

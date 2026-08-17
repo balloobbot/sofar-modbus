@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from modbus_connection import ModbusConnectionError, ModbusError, ModbusTimeoutError
@@ -143,9 +144,8 @@ class SofarLegacyInverter:
         self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
-        # Only readings tile each other, so only they are pooled.
         self._readings = self._pool(self._served(_READINGS))
-        self._settings = self._served(_SETTINGS)
+        self._settings = self._pool(self._served(_SETTINGS))
 
     def _served(self, names: tuple[str, ...]) -> list[str]:
         """Those of ``names`` this inverter's model actually serves."""
@@ -183,10 +183,7 @@ class SofarLegacyInverter:
 
         The first call sets the inverter up.
         """
-        if self._readings is None:
-            await self.async_setup()
-        assert self._readings is not None  # async_setup() builds it
-        return await self._async_poll(self._readings, UpdateReport(set(), {}))
+        return await self._async_poll("_readings")
 
     async def async_update_settings(self) -> UpdateReport:
         """Refresh what is configured, plus the identity.
@@ -195,18 +192,18 @@ class SofarLegacyInverter:
         AC-coupled inverter's battery floor — and none of it changes on its own,
         so a caller polls it rarely. The first call sets the inverter up.
         """
-        if self._settings is None:
-            await self.async_setup()
-        assert self._settings is not None  # async_setup() builds it
-        return await self._async_poll(self._settings, UpdateReport(set(), {}))
+        return await self._async_poll("_settings")
 
     async def async_update(self) -> UpdateReport:
         """Refresh readings and settings together, in one report."""
         report = await self.async_update_readings()
-        assert self._settings is not None  # the readings poll set the inverter up
-        return await self._async_poll(self._settings, report)
+        return await self._async_poll("_settings", report)
 
-    async def _async_poll(self, names: list[str], report: UpdateReport) -> UpdateReport:
+    async def _async_poll(
+        self,
+        names: Sequence[str] | str,
+        report: UpdateReport | None = None,
+    ) -> UpdateReport:
         """Read each sub-system on its own, adding what happened to ``report``.
 
         Same contract as :meth:`sofar_modbus.SofarInverter._async_poll`: a
@@ -215,7 +212,13 @@ class SofarLegacyInverter:
         dead link raises ``ModbusConnectionError`` — as does a timeout before
         anything answered.
         """
-        for name in names:
+        if self._readings is None or self._settings is None:
+            await self.async_setup()
+            assert self._readings is not None and self._settings is not None
+        targets = getattr(self, names) if isinstance(names, str) else names
+        if report is None:
+            report = UpdateReport(set(), {})
+        for name in targets:
             target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
             try:
                 await target.async_update(notify=False)
@@ -229,7 +232,7 @@ class SofarLegacyInverter:
                 report.failed[name] = err
             else:
                 report.updated.add(name)
-        for name in names:
+        for name in targets:
             if name in report.updated:
                 fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
                 fresh.notify()
