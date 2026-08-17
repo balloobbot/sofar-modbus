@@ -63,6 +63,24 @@ async def test_polled_components_covers_both_poll_lists(
     assert hybrid.polled_components == tuple(hybrid._readings + hybrid._settings)
 
 
+async def test_settings_components_names_what_the_settings_poll_reads(
+    hybrid: SofarInverter,
+) -> None:
+    """The accessor is the split itself, not a copy of it.
+
+    A caller routing per component cannot drift from what each poll touches.
+    """
+    assert hybrid.settings_components is None
+    settings = await hybrid.async_update_settings()
+    readings = await hybrid.async_update_readings()
+
+    split = hybrid.settings_components
+    polled = hybrid.polled_components
+    assert split is not None and polled is not None  # settled by the polls above
+    assert set(split) == settings.updated | set(settings.failed)
+    assert set(polled) - set(split) == readings.updated | set(readings.failed)
+
+
 async def test_prime_sets_up_polling_like_async_setup_would(
     hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
 ) -> None:

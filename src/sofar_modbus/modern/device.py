@@ -239,6 +239,20 @@ class SofarInverter:
             return None
         return tuple(self._readings) + tuple(self._settings)
 
+    @property
+    def settings_components(self) -> tuple[str, ...] | None:
+        """Which of ``polled_components`` ``async_update_settings()`` reads.
+
+        The rest are what ``async_update_readings()`` reads. For a caller that
+        schedules the two apart and has to route per component — it should not
+        have to keep its own copy of the split to do that. A device class whose
+        whole map is telemetry, like :class:`~sofar_modbus.SofarLegacyInverter`,
+        has no settings poll and so does not offer this.
+
+        None until `async_setup()` or `prime()` has run.
+        """
+        return tuple(self._settings) if self._settings is not None else None
+
     def _served(self, names: tuple[str, ...]) -> list[str]:
         """Those of ``names`` this inverter's model actually serves."""
         inverter_type = self.inverter_type
