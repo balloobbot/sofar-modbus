@@ -116,10 +116,9 @@ class SofarInverter:
     serves and reports it by attribute name. A component that is not polled
     leaves all its fields at ``None``.
 
-    What the inverter measures and what it has been configured to do refresh
-    separately — ``async_update_readings()`` and ``async_update_settings()`` —
-    so a caller can poll the settings rarely, or on demand after writing one.
-    ``async_update()`` does both.
+    Telemetry measurements and configured settings refresh separately — via
+    ``async_update_readings()`` and ``async_update_settings()`` — or together
+    via ``async_update()``.
 
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
@@ -256,21 +255,16 @@ class SofarInverter:
         ]
 
     async def async_update_readings(self) -> UpdateReport:
-        """Refresh what the inverter measures: power, energy, battery, state.
-
-        The first call sets the inverter up.
-        """
+        """Refresh telemetry measurements (power, energy, battery, state)."""
         if self._readings is None:
             await self._async_setup()
             assert self._readings is not None
         return await self._async_poll(self._readings)
 
     async def async_update_settings(self) -> UpdateReport:
-        """Refresh what is configured: charger mode, limits, battery config.
+        """Refresh configuration registers (charger mode, limits, battery config).
 
-        These change when something writes them, not on their own, so a caller
-        that polls them at all polls them rarely — and reads them straight after
-        writing one. The first call sets the inverter up.
+        Split from telemetry because configuration only changes when written.
         """
         if self._settings is None:
             await self._async_setup()
@@ -278,10 +272,7 @@ class SofarInverter:
         return await self._async_poll(self._settings)
 
     async def async_update(self) -> UpdateReport:
-        """Refresh readings and settings together, in one report.
-
-        For a caller that does not want to schedule the two apart.
-        """
+        """Refresh readings and settings together in one report."""
         report = await self.async_update_readings()
         assert self._settings is not None
         return await self._async_poll(self._settings, report)
