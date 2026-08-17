@@ -54,7 +54,7 @@ async def test_listeners_fire_at_the_end_and_only_for_fresh_components(
     mock_modbus_unit.read_events.clear()
     await hybrid.async_update()
 
-    # One notification, after every component was tried; none for the failure.
+    # One notification, after the whole poll was tried; none for the failure.
     assert seen == [len(mock_modbus_unit.read_events)]
 
 
@@ -141,3 +141,30 @@ async def test_legacy_fatal_timeout_matches_the_modern_contract(
         await legacy_hybrid.async_update()
 
     assert len(mock_modbus_unit.read_events) == 1
+
+
+async def test_a_settings_poll_alone_gives_up_on_a_silent_inverter(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """Nothing having answered yet is per poll: a settings poll pays one timeout."""
+    await hybrid.async_update()
+
+    mock_modbus_unit.fail_read(0x042C, ModbusTimeoutError("inverter asleep"))
+    mock_modbus_unit.read_events.clear()
+    with pytest.raises(ModbusTimeoutError):
+        await hybrid.async_update_settings()
+
+    assert len(mock_modbus_unit.read_events) == 1
+
+
+async def test_the_same_timeout_inside_a_full_update_is_contained(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """The readings already answered, so the inverter is not silent after all."""
+    await hybrid.async_update()
+
+    mock_modbus_unit.fail_read(0x042C, ModbusTimeoutError("slow identity block"))
+    report = await hybrid.async_update()
+
+    assert set(report.failed) == {"identity"}
+    assert "state" in report.updated

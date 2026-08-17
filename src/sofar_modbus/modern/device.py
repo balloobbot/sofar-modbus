@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -55,38 +56,6 @@ if TYPE_CHECKING:
 SERIAL_REGISTER = 0x0445
 SERIAL_WORDS = 7
 
-# Every component attribute a poll may refresh, in read order. battery_pack is
-# absent: its packs share one register block and are read via async_read_pack().
-_POLLED = (
-    "state",
-    "identity",
-    "grid",
-    "offgrid",
-    "offgrid_single_phase",
-    "offgrid_three_phase",
-    "pv_1_2",
-    "pv_3",
-    "pv_4",
-    "pv_5_6",
-    "pv_7_8",
-    "pv_9_10",
-    "battery_1_2",
-    "battery_3_8",
-    "battery_totals",
-    "energy",
-    "battery_energy",
-    "rtc_sync",
-    "feed_in",
-    "eps",
-    "battery_active_control",
-    "parallel",
-    "battery_config_id",
-    "battery_config",
-    "remote",
-    "active_power_control",
-    "charger",
-    "passive",
-)
 _SET_TIME_REGISTER = 0x1004
 _IV_CURVE_SCAN_REGISTER = 0x1027
 
@@ -147,6 +116,10 @@ class SofarInverter:
     serves and reports it by attribute name. A component that is not polled
     leaves all its fields at ``None``.
 
+    Telemetry measurements and configured settings refresh separately — via
+    ``async_update_readings()`` and ``async_update_settings()`` — or together
+    via ``async_update()``.
+
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
     """
@@ -155,6 +128,8 @@ class SofarInverter:
         self,
         unit: ModbusUnit,
         *,
+        serial_number: str | None = None,
+        model: str | None = None,
         inverter_type: InverterType | None = None,
         read_eps: bool = False,
         read_pm: bool = False,
@@ -163,18 +138,19 @@ class SofarInverter:
 
         ``read_eps`` and ``read_pm`` mirror the integration's options: the
         off-grid and parallel-system registers are only read when asked for,
-        because an inverter without them refuses the blocks. ``inverter_type``
-        skips serial-number detection for a device the table does not know.
+        because an inverter without them refuses the blocks. ``serial_number``,
+        ``model`` and ``inverter_type`` allow callers that already know the device's
+        identity to pass them in and skip reading the serial number over Modbus.
         """
         self._unit = unit
         self._options = (EPS if read_eps else InverterType(0)) | (
             PM if read_pm else InverterType(0)
         )
-        self.inverter_type: InverterType | None = None
-        self.model: str | None = None
-        self.serial_number: str | None = None
-        if inverter_type is not None:
-            self.inverter_type = inverter_type | self._options
+        self.model = model
+        self.serial_number = serial_number
+        self.inverter_type = (
+            inverter_type | self._options if inverter_type is not None else None
+        )
 
         self.state = InverterState(unit)
         self.identity = Identity(unit)
@@ -207,102 +183,145 @@ class SofarInverter:
         # Read one pack at a time through async_read_pack(), never with the poll.
         self.battery_pack = BatteryPack(unit)
 
-        self._polled: list[str] | None = None
+        self._readings: list[str] | None = None
+        self._settings: list[str] | None = None
 
     @property
     def has_battery_tower(self) -> bool:
         """Whether this inverter reports a BTS battery tower."""
         return self.inverter_type is not None and BAT_BTS in self.inverter_type
 
-    @property
-    def polled_components(self) -> tuple[str, ...] | None:
-        """Component names this inverter serves, in poll order.
-
-        None until `async_setup()` or `prime()` has run. Public mirror of the
-        private list they build, for callers (e.g. Home Assistant's
-        DataUpdateCoordinator) that need to split components into poll tiers
-        without reaching into `_polled` directly.
-        """
-        return tuple(self._polled) if self._polled is not None else None
-
-    async def async_setup(self) -> None:
+    async def _async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll.
 
-        Run by the first :meth:`async_update` if the caller does not run it
-        itself. A failure leaves the device unset up, so the next update retries.
+        Run by the first update if not already set up. A failure leaves the
+        device unset up, so the next update retries.
         """
-        words = await self._unit.read_holding_registers(SERIAL_REGISTER, SERIAL_WORDS)
-        self.serial_number = decode_string(words)
-        detected, model = identify(self.serial_number)
+        if self.serial_number is None:
+            words = await self._unit.read_holding_registers(
+                SERIAL_REGISTER, SERIAL_WORDS
+            )
+            self.serial_number = decode_string(words)
         if self.inverter_type is None:
+            detected, model = identify(self.serial_number)
             self.inverter_type = detected | self._options
-            self.model = model
-        elif model is not None:
-            self.model = model
+            if self.model is None:
+                self.model = model
+        elif self.model is None:
+            _, model = identify(self.serial_number)
+            if model is not None:
+                self.model = model
         inverter_type = self.inverter_type
-        self._polled = [
+        assert inverter_type is not None
+        self._readings = [
             name
-            for name in _POLLED
+            for name in (
+                "state",
+                "grid",
+                "offgrid",
+                "offgrid_single_phase",
+                "offgrid_three_phase",
+                "pv_1_2",
+                "pv_3",
+                "pv_4",
+                "pv_5_6",
+                "pv_7_8",
+                "pv_9_10",
+                "battery_1_2",
+                "battery_3_8",
+                "battery_totals",
+                "energy",
+                "battery_energy",
+            )
+            if matches(inverter_type, getattr(self, name).applies_to)
+        ]
+        self._settings = [
+            name
+            for name in (
+                "identity",
+                "rtc_sync",
+                "feed_in",
+                "eps",
+                "battery_active_control",
+                "parallel",
+                "battery_config_id",
+                "battery_config",
+                "remote",
+                "active_power_control",
+                "charger",
+                "passive",
+            )
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
 
-    def prime(self, serial_number: str, model: str | None) -> None:
-        """Set up polling from an already-known identity.
+    def _notify(self, report: UpdateReport) -> None:
+        """Fire listeners on every component that successfully refreshed."""
+        for name in report.updated:
+            fresh: SofarComponent = getattr(self, name)
+            fresh.notify()
 
-        Skips the serial-number read `async_setup()` would otherwise need, for
-        callers that already know a device's identity from a previous probe
-        (e.g. a Home Assistant config entry's unique_id) and want to avoid
-        blocking on I/O to re-read it. `inverter_type` must already be set on
-        this instance -- pass it to the constructor. Mirrors `async_setup()`'s
-        post-read bookkeeping exactly.
+    async def async_update_readings(self) -> UpdateReport:
+        """Refresh telemetry measurements (power, energy, battery, state)."""
+        if self._readings is None:
+            await self._async_setup()
+            assert self._readings is not None
+        report = await self._async_poll(self._readings)
+        self._notify(report)
+        return report
+
+    async def async_update_settings(self) -> UpdateReport:
+        """Refresh configuration registers (charger mode, limits, battery config).
+
+        Split from telemetry because configuration only changes when written.
         """
-        if self.inverter_type is None:
-            raise ValueError(
-                "prime() requires inverter_type to already be set "
-                "(pass it to the constructor)"
-            )
-        self.serial_number = serial_number
-        self.model = model
-        self._polled = [
-            name
-            for name in _POLLED
-            if matches(self.inverter_type, getattr(self, name).applies_to)
-        ]
+        if self._settings is None:
+            await self._async_setup()
+            assert self._settings is not None
+        report = await self._async_poll(self._settings)
+        self._notify(report)
+        return report
 
     async def async_update(self) -> UpdateReport:
-        """Refresh every sub-system this inverter serves, one at a time.
+        """Refresh readings and settings together in one report."""
+        if self._readings is None or self._settings is None:
+            await self._async_setup()
+            assert self._readings is not None and self._settings is not None
+        report = await self._async_poll(self._readings)
+        await self._async_poll(self._settings, report)
+        self._notify(report)
+        return report
+
+    async def _async_poll(
+        self,
+        targets: Sequence[str],
+        report: UpdateReport | None = None,
+    ) -> UpdateReport:
+        """Read each component on its own, adding what happened to ``report``.
 
         Components are read independently, the way the integration reads its
         blocks: a sub-system whose read fails keeps its previous values while
-        the rest still refresh. Listeners fire only after every component has
-        been tried, and only on the ones that refreshed. A failure of the link
-        itself raises ``ModbusConnectionError`` instead of reporting, and so
-        does a timeout before anything has answered: a silent inverter is not
-        walked component by component, paying a timeout for each.
+        the rest still refresh. A failure of the link itself raises
+        ``ModbusConnectionError`` instead of reporting, and so does a timeout
+        before anything has answered: a silent inverter is not walked component
+        by component, paying a timeout for each.
         """
-        if self._polled is None:
-            await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
-        updated: set[str] = set()
-        failed: dict[str, ModbusError] = {}
-        for name in self._polled:
+        if report is None:
+            report = UpdateReport(set(), {})
+        for name in targets:
             component: SofarComponent = getattr(self, name)
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusTimeoutError as err:
-                if not updated and not failed:
+                if not report.updated and not report.failed:
                     raise  # nothing answered at all: assume the rest time out too
-                failed[name] = err
+                report.failed[name] = err
             except ModbusError as err:
-                failed[name] = err
+                report.failed[name] = err
             else:
-                updated.add(name)
-        for name in updated:
-            fresh: SofarComponent = getattr(self, name)
-            fresh.notify()
-        return UpdateReport(updated, failed)
+                report.updated.add(name)
+        return report
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
         """Every register this inverter reads, undecoded — for diagnostics.
@@ -315,11 +334,11 @@ class SofarInverter:
         :meth:`async_read_pack`. Nothing notifies: a download is not a poll.
         The first call sets the inverter up.
         """
-        if self._polled is None:
-            await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
+        if self._readings is None or self._settings is None:
+            await self._async_setup()
+            assert self._readings is not None and self._settings is not None
         raw: dict[str, dict[int, int | bool]] = {}
-        for name in self._polled:
+        for name in (*self._readings, *self._settings):
             component: SofarComponent = getattr(self, name)
             for space, values in (await component.async_read_raw(notify=False)).items():
                 raw.setdefault(space, {}).update(values)

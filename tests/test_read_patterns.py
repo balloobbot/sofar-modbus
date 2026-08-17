@@ -14,10 +14,9 @@ from collections.abc import Iterable
 from modbus_connection.mock import MockModbusUnit, ReadEvent
 
 from sofar_modbus import SofarInverter, SofarLegacyInverter
-from sofar_modbus.legacy.device import _POLLED as _LEGACY_POLLED
 from sofar_modbus.model import SofarLegacyComponent
 from sofar_modbus.modern import BatteryStrings1To2, BatteryStrings3To8
-from sofar_modbus.variants import matches
+from sofar_modbus.variants import AC, X1, matches
 
 from .conftest import LEGACY_HOLDING, MODERN_HOLDING, ascii_words
 
@@ -50,7 +49,18 @@ def legacy_served(
     """Every component this inverter polls, named — pools flattened to members."""
     assert inverter.inverter_type is not None  # settled by the first update
     served = []
-    for name in _LEGACY_POLLED:
+    for name in (
+        "identity",
+        "pv_common",
+        "pv_single_phase",
+        "pv_three_phase",
+        "storage",
+        "storage_three_phase",
+        "storage_eps",
+        "hybrid_pv_1",
+        "hybrid_pv_2",
+        "battery_settings",
+    ):
         component: SofarLegacyComponent = getattr(inverter, name)
         if matches(inverter.inverter_type, component.applies_to):
             served.append((name, component))
@@ -74,6 +84,34 @@ async def test_a_poll_reads_every_field_of_every_polled_component(
     for name in report.updated:
         missing = field_addresses(getattr(hybrid, name)) - read
         assert not missing, f"{name} missed {sorted(missing)}"
+
+
+async def test_readings_and_settings_read_their_own_blocks(
+    hybrid: SofarInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """Neither method touches the other's registers, and together they are the poll."""
+    await hybrid.async_update()
+
+    mock_modbus_unit.read_events.clear()
+    readings = await hybrid.async_update_readings()
+    reading_blocks = [(b.address, b.count) for b in mock_modbus_unit.read_events]
+
+    mock_modbus_unit.read_events.clear()
+    settings = await hybrid.async_update_settings()
+    setting_blocks = [(b.address, b.count) for b in mock_modbus_unit.read_events]
+
+    mock_modbus_unit.read_events.clear()
+    await hybrid.async_update()
+    assert [
+        (b.address, b.count) for b in mock_modbus_unit.read_events
+    ] == reading_blocks + setting_blocks
+
+    assert readings.updated.isdisjoint(settings.updated)
+    assert "energy" in readings.updated  # counters are measured, not configured
+    assert {"identity", "feed_in", "charger", "battery_config"} <= settings.updated
+    # Nearly a quarter of the poll a caller need not pay for every cycle.
+    assert sum(count for _, count in reading_blocks) == 211
+    assert sum(count for _, count in setting_blocks) == 65
 
 
 async def test_a_poll_reads_nothing_no_component_asked_for(
@@ -230,6 +268,21 @@ async def test_legacy_three_phase_pv_reads_only_the_0x0000_block(
         ("input", 0x2002, 6),
         ("holding", 0x0000, 33),
     ]
+
+
+async def test_a_legacy_ac_inverter_polls_its_battery_floor(
+    mock_modbus_unit: MockModbusUnit,
+) -> None:
+    """An AC-coupled inverter includes the battery floor setting in its poll."""
+    mock_modbus_unit.holding.update(LEGACY_HOLDING)
+    mock_modbus_unit.input[0x2002] = ascii_words("SC1E1234567890", 6)
+    mock_modbus_unit.input[0x104D] = 20
+    inverter = SofarLegacyInverter(mock_modbus_unit, inverter_type=AC | X1)
+
+    report = await inverter.async_update()
+
+    assert "battery_settings" in report.updated
+    assert inverter.battery_settings.battery_minimum_capacity == 20
 
 
 async def test_legacy_poll_reads_every_field_of_every_polled_component(

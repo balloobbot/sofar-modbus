@@ -31,7 +31,7 @@ async def test_setup_strips_the_padding_the_boards_add(
     """The plugin runs the serial through a character filter; so do we."""
     mock_modbus_unit.input[0x2002] = ascii_words("SM1E\x01234567\x02", 6)
     inverter = SofarLegacyInverter(mock_modbus_unit)
-    await inverter.async_setup()
+    await inverter._async_setup()
     assert inverter.serial_number == "SM1E234567"
     assert inverter.inverter_type == HYBRID | X1
 
@@ -165,3 +165,23 @@ async def test_an_ac_coupled_inverter_reads_the_input_register_setting(
     await inverter.async_update()
     assert inverter.battery_settings.battery_minimum_capacity == 20
     assert inverter.storage.run_mode is StorageRunMode.NORMAL_MODE
+
+
+async def test_constructor_identity_skips_serial_number_read(
+    legacy_hybrid: SofarLegacyInverter, mock_modbus_unit: MockModbusUnit
+) -> None:
+    """Identity passed to the constructor skips the serial-number read."""
+    await legacy_hybrid.async_update()
+
+    mock_modbus_unit.read_events.clear()
+    device = SofarLegacyInverter(
+        mock_modbus_unit,
+        serial_number=LEGACY_HYBRID_SERIAL,
+        inverter_type=HYBRID | X1,
+        read_eps=True,
+    )
+    await device._async_setup()
+
+    assert not mock_modbus_unit.read_events  # no serial number register read
+    assert device.serial_number == LEGACY_HYBRID_SERIAL
+    assert device.inverter_type == legacy_hybrid.inverter_type

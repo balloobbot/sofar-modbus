@@ -21,20 +21,6 @@ if TYPE_CHECKING:
 SERIAL_REGISTER = 0x2002  # input register space
 SERIAL_WORDS = 6
 
-# Every component attribute a poll may refresh, in read order.
-_POLLED = (
-    "identity",
-    "pv_common",
-    "pv_single_phase",
-    "pv_three_phase",
-    "storage",
-    "storage_three_phase",
-    "storage_eps",
-    "hybrid_pv_1",
-    "hybrid_pv_2",
-    "battery_settings",
-)
-
 # Runs of registers several components tile, pooled into one read. Reading a
 # member apart costs a request and isolates nothing: ``storage`` spans
 # 0x0200-0x0245, which holds every S/T phase and EPS register, and
@@ -79,10 +65,9 @@ def identify(serial: str) -> InverterType:
 class SofarLegacyInverter:
     """An older Sofar inverter reached through a ``ModbusUnit``.
 
-    Same shape as :class:`sofar_modbus.SofarInverter`, over the older register
-    map: the 0x0000 block for PV-only inverters and the 0x0200 block for storage
-    ones. This generation is read-only — the plugin declares no writable
-    register for it, so neither does this library.
+    Reads the older register map: the 0x0000 block for PV-only inverters and the
+    0x0200 block for storage ones. This generation is read-only — the plugin
+    declares no writable register for it, so neither does this library.
 
     ASCII framing over TCP is not supported. Build the unit from an RTU or
     RTU-over-TCP connection.
@@ -92,15 +77,16 @@ class SofarLegacyInverter:
         self,
         unit: ModbusUnit,
         *,
+        serial_number: str | None = None,
         inverter_type: InverterType | None = None,
         read_eps: bool = False,
     ) -> None:
         self._unit = unit
         self._options = EPS if read_eps else InverterType(0)
-        self.inverter_type: InverterType | None = None
-        self.serial_number: str | None = None
-        if inverter_type is not None:
-            self.inverter_type = inverter_type | self._options
+        self.serial_number = serial_number
+        self.inverter_type = (
+            inverter_type | self._options if inverter_type is not None else None
+        )
 
         self.identity = LegacyIdentity(unit)
         self.pv_common = PvCommon(unit)
@@ -126,17 +112,30 @@ class SofarLegacyInverter:
         present = [p for p in powers if p is not None]
         return sum(present) if present else None
 
-    async def async_setup(self) -> None:
+    async def _async_setup(self) -> None:
         """Read the serial number, settle the model, and pick what to poll."""
-        words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
-        # The plugin strips the punctuation these boards pad the field with.
-        self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
+        if self.serial_number is None:
+            words = await self._unit.read_input_registers(SERIAL_REGISTER, SERIAL_WORDS)
+            # The plugin strips the punctuation these boards pad the field with.
+            self.serial_number = re.sub(r"[^A-Za-z0-9 -]", "", decode_string(words))
         if self.inverter_type is None:
             self.inverter_type = identify(self.serial_number) | self._options
         inverter_type = self.inverter_type
+        assert inverter_type is not None
         served = [
             name
-            for name in _POLLED
+            for name in (
+                "identity",
+                "pv_common",
+                "pv_single_phase",
+                "pv_three_phase",
+                "storage",
+                "storage_three_phase",
+                "storage_eps",
+                "hybrid_pv_1",
+                "hybrid_pv_2",
+                "battery_settings",
+            )
             if matches(inverter_type, getattr(self, name).applies_to)
         ]
         self._polled = self._pool(served)
@@ -172,8 +171,8 @@ class SofarLegacyInverter:
         anything answered.
         """
         if self._polled is None:
-            await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
+            await self._async_setup()
+            assert self._polled is not None
         updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
         for name in self._polled:
@@ -190,9 +189,10 @@ class SofarLegacyInverter:
                 failed[name] = err
             else:
                 updated.add(name)
-        for name in updated:
-            fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
-            fresh.notify()
+        for name in self._polled:
+            if name in updated:
+                fresh: SofarLegacyComponent | ComponentGroup = getattr(self, name)
+                fresh.notify()
         return UpdateReport(updated, failed)
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
@@ -204,8 +204,8 @@ class SofarLegacyInverter:
         poll. The first call sets the inverter up.
         """
         if self._polled is None:
-            await self.async_setup()
-        assert self._polled is not None  # async_setup() builds it
+            await self._async_setup()
+            assert self._polled is not None
         raw: dict[str, dict[int, int | bool]] = {}
         for name in self._polled:
             target: SofarLegacyComponent | ComponentGroup = getattr(self, name)
