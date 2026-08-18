@@ -42,14 +42,16 @@ Inverter = SofarInverter | SofarLegacyInverter
 
 
 def served_components(inverter: Inverter) -> list[tuple[str, Component]]:
-    """The components this inverter serves."""
+    """The components this inverter serves; ``battery_pack`` needs the tower flag."""
     inverter_type = inverter.inverter_type
     assert inverter_type is not None  # the update below set the inverter up
+    has_tower = isinstance(inverter, SofarInverter) and inverter.has_battery_tower
     return [
         (name, component)
         for name, component in vars(inverter).items()
         if isinstance(component, SofarComponentBase)
         and matches(inverter_type, component.applies_to)
+        and (name != "battery_pack" or has_tower)
     ]
 
 
@@ -90,7 +92,7 @@ async def main() -> int:
         else SofarInverter(counting, read_eps=args.eps, read_pm=args.pm)
     )
     try:
-        await inverter.async_update()  # the first update sets the inverter up
+        report = await inverter.async_update()  # the first update sets the inverter up
     except ModbusError as err:
         print(f"Could not read the inverter: {str(err) or type(err).__name__}")
         return 1
@@ -105,6 +107,10 @@ async def main() -> int:
     for name, component in served_components(inverter):
         print()
         print_component(component, title=name)
+    if report.failed:
+        print("\nFailed to read:")
+        for name, error in report.failed.items():
+            print(f"  {name}: {str(error) or type(error).__name__}")
     print(f"\n{counting.reads} Modbus reads")
     return 0
 
